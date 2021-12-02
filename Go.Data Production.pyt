@@ -10,6 +10,7 @@ import collections
 import copy
 from datetime import datetime, timedelta
 from pathlib import Path
+import pandas as pd
 
 def create_working_directory(in_loc):
     now_ts = datetime.now().strftime('%Y%m%d%H%M%S')
@@ -79,7 +80,7 @@ def get_ref_data(in_gd_api_url, token):
         "type": "json",
         "access_token": token
     }
-    ref_data = requests.get(f'{in_gd_api_url}/api/reference-data/export', params=params)
+    ref_data = requests.get(f'{in_gd_api_url}/api/reference-data', params=params)
     ref_data_json = ref_data.json()
     arcpy.AddMessage(f'got reference data :: {len(ref_data_json)} items found')
     return ref_data_json
@@ -94,10 +95,47 @@ def get_cases(outbreak_id, in_gd_api_url, token):
     arcpy.AddMessage(f'got cases data :: {len(case_data_json)} cases found')
     return case_data_json
 
+def get_locations(in_gd_api_url, token):
+    params = {
+        "access_token": token,
+    }
+    location_data = requests.get(f'{in_gd_api_url}/api/locations', params=params)
+    location_data_json = location_data.json()
+    arcpy.AddMessage(f'got locations data :: {len(location_data_json)} locations found')
+    return location_data_json
+
+def get_contacts(outbreak_id, in_gd_api_url, token):
+    params = {
+        "access_token": token,
+    }
+    contact_data = requests.get(f'{in_gd_api_url}/api/outbreaks/{outbreak_id}/contacts', params=params)
+    contact_data_json = contact_data.json()
+    arcpy.AddMessage(f'got contacts data :: {len(contact_data_json)} contacts found')
+    return contact_data_json
+
+def get_relationships(outbreak_id, in_gd_api_url, token):
+    params = {
+        "access_token": token,
+    }
+    relate_data = requests.get(f'{in_gd_api_url}/api/outbreaks/{outbreak_id}/relationships', params=params)
+    relate_data_json = relate_data.json()
+    arcpy.AddMessage(f'got relationships data :: {len(relate_data_json)} relationships found')
+    return relate_data_json
+
+def get_followups(outbreak_id, in_gd_api_url, token):
+    params = {
+        "access_token": token,
+    }
+    followup_data = requests.get(f'{in_gd_api_url}/api/outbreaks/{outbreak_id}/follow-ups', params=params)
+    followup_data_json = followup_data.json()
+    arcpy.AddMessage(f'got followups data :: {len(followup_data_json)} followups found')
+    return followup_data_json
+
+
 def get_value_from_code(case_value, ref_data):
     for ref in ref_data:
-        if ref['ID'] == case_value:
-            return ref['Label']
+        if ref['id'] == case_value:
+            return ref['value']
     
     return case_value
 
@@ -113,21 +151,41 @@ def convert_features_to_csv(features):
     
     return headers, rows
 
-def convert_gd_json_to_csv(cases, ref_data):
+def convert_cases_json_to_csv(cases, ref_data):
     features = []
     for case in cases:
         feature = {}
         keys = case.keys()
         for key in keys:
-            if key == 'addresses':
+            if key == 'age':
+                feature['age'] = case[key]['years']
+                feature['age_months'] = case[key]['months']
+            elif key == 'addresses':
                 address = case[key][0]
                 location_id = address['locationId']
-                feature['locationId'] = location_id
+                feature['locationId'] = location_id ## do not remove
                 feature['locationClassification'] = address['typeId']
-            elif key == 'age':
-                feature['age_years'] = case[key]['years']
-                feature['age_months'] = case[key]['months']
-            elif not isinstance(case[key], collections.Mapping) and not isinstance(case[key], list):
+                if 'city' in address:
+                    feature['city'] = address['city']
+                if 'postalCode' in address:
+                    feature['postalCode'] = address['postalCode']
+                if 'addressLine1' in address:
+                    feature['addressLine1'] = address['addressLine1']  
+            elif key == 'locations':
+                location = case[key][0]
+                feature['adminLevel'] = location['geographicalLevelId'].split('_')[-1]
+                #feature['locationId'] = location['id']
+                # if 'geoLocation' in location:
+                #     feature['Lat'] = location['geoLocation']['lat']
+                #     feature['Lng'] = location['geoLocation']['lng'] 
+            elif key == 'dob':
+                feature['dateOfBurial'] = case[key]
+            elif key == 'vaccinesReceived':
+                if len(case[key]) > 0:
+                    feature['vaccinated'] = 'True'
+                else:
+                    feature['vaccinated'] = 'False'
+            elif not isinstance(case[key], collections.abc.Mapping) and not isinstance(case[key], list):
                 case_value = case[key]
                 if isinstance(case_value, str) and 'LNG_' in case_value:
                     feature[f'{key}_code'] = case_value
@@ -136,7 +194,124 @@ def convert_gd_json_to_csv(cases, ref_data):
                 feature[key] = case_value
                 
         features.append(feature)
+    return features
 
+def convert_loc_json_to_csv(locations, ref_data):
+    features = []
+    for loc in locations:
+        feature = {}
+        keys = loc.keys()
+        for key in keys:
+            if key == 'geoLocation':
+                feature['Lat'] = loc[key]['lat']
+                feature['Lng'] = loc[key]['lng']    
+            elif not isinstance(loc[key], collections.abc.Mapping) and not isinstance(loc[key], list):
+                loc_value = loc[key]
+                if isinstance(loc_value, str) and 'LNG_' in loc_value:
+                    feature[f'{key}_code'] = loc_value
+                    loc_value = get_value_from_code(loc_value, ref_data)
+                feature[key] = loc_value
+         
+        features.append(feature)
+    return features
+
+def convert_contacts_json_to_csv(contacts, ref_data):
+    features = []
+    for contact in contacts:
+        feature = {}
+        keys = contact.keys()
+        for key in keys:
+            if key =='followUp':
+                #feature['followUpStatus'] = contact[key]['status']
+                feature['dateFollowUpStart'] = contact[key]['startDate']
+                feature['dateFollowUpEnd'] = contact[key]['endDate']
+            elif key == 'age':
+                feature['age'] = contact[key]['years']
+                feature['age_months'] = contact[key]['months']
+            elif key == 'addresses':
+                address = contact[key][0]
+                location_id = address['locationId']
+                feature['locationId'] = location_id
+                feature['locationClassification'] = address['typeId']
+                if 'city' in address:
+                    feature['city'] = address['city']
+                if 'postalCode' in address:
+                    feature['postalCode'] = address['postalCode']
+                if 'addressLine1' in address:
+                    feature['addressLine1'] = address['addressLine1']  
+                if 'emailAddress' in address:
+                    feature['email'] = address['emailAddress']
+                if 'phoneNumber' in address:
+                    feature['phoneNumber'] = address['phoneNumber']
+            elif key == 'vaccinesReceived':
+                if len(contact[key]) > 0:
+                    feature['vaccinated'] = 'True'
+                else:
+                    feature['vaccinated'] = 'False'
+            elif key == 'dob':
+                feature['dateOfBurial'] = contact[key]
+            elif key == 'relationshipsRepresentation':
+                feature['relationshipId'] = contact[key][0]['id']
+            elif not isinstance(contact[key], collections.abc.Mapping) and not isinstance(contact[key], list):
+                contact_value = contact[key]
+                if isinstance(contact_value, str) and 'LNG_' in contact_value:
+                    feature[f'{key}_code'] = contact_value
+                    contact_value = get_value_from_code(contact_value, ref_data)
+                feature[key] = contact_value
+        features.append(feature)
+    return features
+
+def convert_relates_json_to_csv(relates, ref_data):
+    features = []
+    for relate in relates:
+        feature = {}
+        keys = relate.keys()
+        for key in keys:
+            if key == 'persons':
+                for person in relate[key]:
+                    if 'source' in list(person.keys()):
+                        feature['source_person_id'] = person['id']
+                        feature['source_person_type'] = person['type']
+                    elif 'target' in list(person.keys()):
+                        feature['target_person_id'] = person['id']
+                        feature['target_person_type']= person['type']
+            elif not isinstance(relate[key], collections.abc.Mapping) and not isinstance(relate[key], list):
+                relate_value = relate[key]
+                if isinstance(relate_value, str) and 'LNG_' in relate_value:
+                    feature[f'{key}_code'] = relate_value
+                    relate_value = get_value_from_code(relate_value, ref_data)
+                feature[key] = relate_value
+        features.append(feature)
+    return features
+
+def convert_followups_json_to_csv(followups, ref_data):
+    features = []
+    for followup in followups:
+        feature = {}
+        keys = followup.keys()
+        for key in keys:
+            if key == 'address':
+                address = followup[key]
+                feature['locationId'] = address['locationId']
+                if 'city' in address:
+                    feature['city'] = address['city']
+                if 'postalCode' in address:
+                    feature['postalCode'] = address['postalCode']
+                if 'addressLine1' in address:
+                    feature['addressLine1'] = address['addressLine1']  
+                if 'emailAddress' in address:
+                    feature['email'] = address['emailAddress']
+                if 'phoneNumber' in address:
+                    feature['phoneNumber'] = address['phoneNumber']
+            elif key == 'contact':
+                feature['visualId'] = followup[key]['visualId']
+            elif not isinstance(followup[key], collections.abc.Mapping) and not isinstance(followup[key], list):
+                followup_value = followup[key]
+                if isinstance(followup_value, str) and 'LNG_' in followup_value:
+                    feature[f'{key}_code'] = followup_value
+                    followup_value = get_value_from_code(followup_value, ref_data)
+                feature[key] = followup_value
+        features.append(feature)
     return features
 
 def create_csv_file(rows, file_name='fromGoData.csv', field_names=None, full_job_path=None):
@@ -188,6 +363,150 @@ def get_attribute_model(in_model):
         }
     }
 
+
+    return attribute_models[in_model]
+
+def get_FieldNameUpdater(in_model):
+    attribute_models = {
+        'case_level_data': {
+            'attributes': {
+                'id':'id',
+                'visualId':'visual_id',
+                'numberOfContacts':'no_contacts',
+                'numberOfExposures':'no_exposures',
+                'classification':'classification',
+                'firstName':'first_name',
+                'middleName':'middle_name',
+                'lastName':'last_name',
+                'gender':'gender',
+                'age':'age',
+                'ageClass':'age_class',
+                'occupation':'occupation',
+                'pregnancyStatus':'pregnancy_status',
+                'dateOfReporting':'date_of_reporting',
+                'dateOfOnset':'date_of_onset',
+                'dateOfInfection':'date_of_infection',
+                'dateBecomeCase':'date_become_case',
+                'dateOfBurial':'date_of_burial',
+                'wasContact':'was_contact',
+                'riskLevel':'risk_level',
+                'riskReason':'risk_reason',
+                'safeBurial':'safe_burial',
+                'transferRefused':'transfer_refused',
+                'responsibleUserId':'responsible_user_id',
+                'admin_0_name':'admin_0_name',
+                'admin_1_name':'admin_1_name',
+                'admin_2_name':'admin_2_name',
+                'admin_3_name':'admin_3_name',
+                'admin_4_name':'admin_4_name',
+                'Lat':'lat',
+                'Lng':'long',
+                'addressLine1':'address',
+                'postalCode':'postal_code',
+                'city':'city',
+                'vaccinated':'vaccinated',
+                'outcomeId':'outcome',
+                'dateOfOutcome':'date_of_outcome',
+                'locationId':'location_id',
+                'createdBy':'created_by',
+                'createdAt':'datetime_created_at',
+                'updatedBy':'updated_by',
+                'updatedAt':'datetime_updated_at',
+            }
+        },
+         'contact_data': {
+            'attributes': {
+                'id':'id',
+                'visualId':'visual_id',
+                'classification':'classification',
+                'followUpStatus':'follow_up_status',
+                'followUpStatusPast7Days': '',
+                'followUpStatusPast14Days': '',
+                'firstName':'first_name',
+                'middleName':'middle_name',
+                'lastName':'last_name',
+                'gender':'gender',
+                'age':'age',
+                'ageClass':'age_class',
+                'occupation':'occupation',
+                'pregnancyStatus':'pregnancy_status',
+                'dateOfReporting':'date_of_reporting',
+                'dateOfLastContact':'date_of_last_contact',
+                'dateOfBurial':'date_of_burial',
+                'dateFollowUpStart':'date_of_follow_up_start',
+                'dateFollowUpEnd':'date_of_follow_up_end',
+                'wasCase':'was_case',
+                'riskLevel':'risk_level',
+                'riskReason':'risk_reason',
+                'safeBurial':'safe_burial',
+                'responsibleUserId':'responsible_user_id',
+                'followUpTeamId':'follow_up_team_id',
+                'admin_0_name':'admin_0_name',
+                'admin_1_name':'admin_1_name',
+                'admin_2_name':'admin_2_name',
+                'admin_3_name':'admin_3_name',
+                'admin_4_name':'admin_4_name',
+                'Lat':'lat',
+                'Lng':'long',
+                'addressLine1':'address',
+                'postalCode':'postal_code',
+                'city':'city',
+                'phoneNumber':'telephone',
+                'email':'email',
+                'vaccinated':'vaccinated',
+                'locationId':'location_id',
+                'createdBy':'created_by',
+                'createdAt':'datetime_created_at',
+                'updatedBy':'updated_by',
+                'updatedAt':'datetime_updated_at'
+        }
+    },
+        'followup_data': {
+            'attributes': {
+                'id':'id',
+                'personId':'contact_id',
+                'visualId':'contact_visual_id',
+                'date':'date',
+                'index':'follow_up_number',
+                'statusId':'follow_up_status',
+                'targeted':'targeted',
+                'responsibleUserId':'responsible_user_id',
+                'teamId': 'team_id',
+                'admin_0_name':'admin_0_name',
+                'admin_1_name':'admin_1_name',
+                'admin_2_name':'admin_2_name',
+                'admin_3_name':'admin_3_name',
+                'admin_4_name':'admin_4_name',
+                'Lat':'lat',
+                'Lng':'long',
+                'addressLine1':'address',
+                'postalCode':'postal_code',
+                'city':'city',
+                'phoneNumber':'telephone',
+                'email':'email',
+                'locationId':'location_id',
+                'createdBy':'created_by',
+                'createdAt':'datetime_created_at',
+                'updatedBy':'updated_by',
+                'updatedAt':'datetime_updated_at'
+        }
+    },
+        'relationship_data': {
+            'attributes': {
+                'id':'id',
+                'source_person_id':'source_person_id',
+                'source_person_visual_id':'source_person_visual_id',
+                'target_person_id':'target_person_id',
+                'target_person_visual_id':'target_person_visual_id',
+                'source_person_type':'source_person_type',
+                'target_person_type':'target_person_type',
+                'createdBy':'created_by',
+                'createdAt':'datetime_created_at',
+                'updatedBy':'updated_by',
+                'updatedAt':'datetime_updated_at'
+        }
+    }
+} 
     return attribute_models[in_model]
 
 def get_feature(location_id, features, model_id):
@@ -601,17 +920,7 @@ class CreateSITREPTables(object):
 
         in_gd_outbreak = selected_outbreak_id
 
-        # get reference codes & labels
-        # e.g. LNG_REFERENCE_DATA_CATEGORY_OUTCOME_ALIVE = 'Alive'
-        arcpy.SetProgressor('default', 'Getting Go.Data reference data')
-        ref_data = get_ref_data(in_gd_api_url, token)
-
-        # get outbreak cases
-        arcpy.SetProgressor('default', 'Getting Outbreak Cases')
-        cases = get_cases(selected_outbreak_id, in_gd_api_url, token)
-        new_cases = convert_gd_json_to_csv(cases, ref_data)
-
-        # setup needed dates
+                # setup needed dates
         dte_format = '%Y-%m-%dT%H:%M:%S.%fZ'
 
         right_now = datetime.now()
@@ -628,7 +937,190 @@ class CreateSITREPTables(object):
         twenty_eight_days_ago = (right_now - twenty_eight_days_delta).date()
         yesterday = (right_now - yesterday_delta).date()
         last_week = (right_now - one_week_delta).date()
-        last_two_weeks = (right_now - two_week_delta).date()
+        last_two_weeks = (right_now - two_week_delta).date() 
+        
+        date_flds = ['date', 'dateOfReporting', 'dateOfOnset', 'dateOfInfection', 'dateOfLastContact', 
+                    'dateBecomeCase', 'dateOfOutcome', 'dateFollowUpStart' , 'dateFollowUpEnd', 'dateOfBurial']
+        dt_flds = ['createdAt', 'updatedAt']
+        age_bins = [0, 4, 14, 24, 64, 150]
+        age_labels = ['<5', '5-14', '15-24', '25-64', '65+']
+
+        def updateDates(date_flds, dt_flds, df):
+            for fld in date_flds:
+                try:
+                    df[fld] = df[fld].str.split('T').str[0]
+                except:
+                    pass
+            for fld in dt_flds:
+                try:
+                    df[fld] = df[fld].astype('datetime64[s]')
+                except:
+                    pass
+        
+        def getVisualIds(rel_df, right_df, person_type):
+            if 'visualId' in list(right_df.columns):
+                visual_ids = right_df[['id', 'visualId']].copy()
+                visual_ids.drop_duplicates(inplace=True)
+                visual_ids.rename(columns = {'id':f'{person_type}_person_id',
+                                                'visualId':f'{person_type}_person_visual_id'}, inplace=True)
+                return pd.merge(rel_df, visual_ids, how='left', left_on= f'{person_type}_person_id', right_on=f'{person_type}_person_id')
+
+
+        # get reference codes & labels
+        # e.g. LNG_REFERENCE_DATA_CATEGORY_OUTCOME_ALIVE = 'Alive'
+        arcpy.SetProgressor('default', 'Getting Go.Data reference data')
+        ref_data = get_ref_data(in_gd_api_url, token)
+
+        #get location data 
+        arcpy.SetProgressor('default', 'Getting Locations')
+        locations = get_locations(in_gd_api_url, token)
+        new_locations = convert_loc_json_to_csv(locations, ref_data)
+        locations_df = pd.DataFrame(new_locations)  
+        
+        #create int field: adminLevel
+        locations_df['adminLevel'] = locations_df['geographicalLevelId'].str.split('_').str[-1]
+        locations_df.loc[locations_df['adminLevel'].isna(), 'adminLevel'] = 99
+        locations_df['adminLevel'] = locations_df['adminLevel'].astype(int)
+        
+        #transpose locations data
+        i = 0
+        while i < 6:
+            flds = ['name', 'parentLocationId', 'id', 'Lat', 'Lng']
+            currentlocid = f'admin_{i}_LocationId'
+            parentlocid = f'admin_{i-1}_LocationId'
+            currentname = f'admin_{i}_name'
+            lat = f'admin_{i}_Lat'
+            lng = f'admin_{i}_Lng'
+            if i == 0:
+                locations_out = locations_df.loc[locations_df['adminLevel']==i].copy()
+                locations_out = locations_out[flds]
+                locations_out.rename(columns = {'id': currentlocid,
+                                        'name': currentname,
+                                        'Lat':lat,
+                                        'Lng':lng}, inplace=True)
+            else:
+                adminlevel = locations_df.loc[locations_df['adminLevel']== i].copy()
+                adminlevel = adminlevel[flds]
+                adminlevel.rename(columns = {'id': currentlocid,
+                                            'parentLocationId': parentlocid,
+                                            'name': currentname,
+                                            'Lat':lat,
+                                            'Lng':lng}, inplace=True)
+                locations_out = locations_out.merge(adminlevel, how='left', left_on=parentlocid, right_on=parentlocid)
+            i+=1
+
+        locations_out.dropna('columns', how='all', inplace=True)
+        locations_out.to_csv(full_job_path.joinpath('Locations.csv'), encoding='utf-8-sig', index=False)
+
+        # get outbreak cases
+        arcpy.SetProgressor('default', 'Getting Outbreak Cases')
+        cases = get_cases(selected_outbreak_id, in_gd_api_url, token)
+        new_cases = convert_cases_json_to_csv(cases, ref_data)
+        cases_df = pd.DataFrame(new_cases)
+        cases_df['classification'] = cases_df['classification'].str.split('CLASSIFICATION_').str[-1]
+        cases_df['gender'] = cases_df['gender'].str.split('GENDER_').str[-1]
+        cases_df['occupation'] = cases_df['occupation'].str.split('OCCUPATION_').str[-1]
+        cases_df['pregnancyStatus'] = cases_df['pregnancyStatus'].str.split('PREGNANCY_STATUS_').str[-1]
+        cases_df['riskLevel'] = cases_df['riskLevel'].str.split('RISK_LEVEL_').str[-1]
+        cases_df['outcomeId'] = cases_df['outcomeId'].str.split('OUTCOME_').str[-1]    
+        updateDates(date_flds, dt_flds, cases_df)
+        cases_df['ageClass'] = pd.cut(cases_df['age'], bins=age_bins, labels=age_labels)
+        
+        # # subset cases data for join to contacts
+        # cases_join = cases_df[['id', 'classification', 'transferRefused', 'outcomeId']].copy()
+        # cases_join.rename(columns={'id':'casesId'}, inplace=True)
+
+        # get contacts
+        arcpy.SetProgressor('default', 'Getting Contact Data')
+        contact_data = get_contacts(selected_outbreak_id, in_gd_api_url, token)
+        new_contacts = convert_contacts_json_to_csv(contact_data, ref_data)
+        contacts_df = pd.DataFrame(new_contacts)
+        contacts_df['gender'] = contacts_df['gender'].str.split('GENDER_').str[-1]
+        contacts_df['occupation'] = contacts_df['occupation'].str.split('OCCUPATION_').str[-1]
+        contacts_df['pregnancyStatus'] = contacts_df['pregnancyStatus'].str.split('PREGNANCY_STATUS_').str[-1]
+        #contacts_df['followUpStatus'] = contacts_df['followUpStatus'].str.split('STATUS_TYPE_').str[-1]
+        contacts_df['riskLevel'] = contacts_df['riskLevel'].str.split('RISK_LEVEL_').str[-1]
+        updateDates(date_flds, dt_flds, contacts_df)
+        contacts_df['ageClass'] = pd.cut(contacts_df['age'], bins=age_bins, labels=age_labels)
+        contacts_df['dateFollowUpStart'] = pd.to_datetime(contacts_df['dateFollowUpStart']).dt.date
+        contacts_df['dateFollowUpEnd'] = pd.to_datetime(contacts_df['dateFollowUpEnd']).dt.date
+        contacts_df.loc[(contacts_df['dateFollowUpStart']<= yesterday) & (contacts_df['dateFollowUpEnd'] >= right_now.date()), ['followUpStatus']] = True
+        contacts_df.loc[contacts_df['followUpStatus'] != True, ['followUpStatus']] = False
+        contacts_df.loc[(contacts_df['dateFollowUpStart']<= last_week) & (contacts_df['dateFollowUpEnd'] >= last_week), ['followUpStatusPast7Days']] = True
+        contacts_df.loc[contacts_df['followUpStatusPast7Days'] != True, ['followUpStatusPast7Days']] = False
+        contacts_df.loc[(contacts_df['dateFollowUpStart']<= last_two_weeks) & (contacts_df['dateFollowUpEnd'] >= last_two_weeks), ['followUpStatusPast14Days']] = True
+        contacts_df.loc[contacts_df['followUpStatusPast14Days'] != True, ['followUpStatusPast14Days']] = False
+        
+        # get followups
+        arcpy.SetProgressor('default', 'Getting Followup Data')
+        followup_data = get_followups(selected_outbreak_id, in_gd_api_url, token)
+        new_followups = convert_followups_json_to_csv(followup_data, ref_data)
+        followups_df = pd.DataFrame(new_followups)
+        followups_df['statusId'] = followups_df['statusId'].str.split('STATUS_TYPE_').str[-1]
+        updateDates(date_flds, dt_flds, followups_df)
+
+        # get relationships
+        arcpy.SetProgressor('default', 'Getting Relationship Data')
+        relate_data = get_relationships(selected_outbreak_id, in_gd_api_url, token)
+        new_relates = convert_relates_json_to_csv(relate_data, ref_data)
+        relates_df = pd.DataFrame(new_relates)
+        relates_df['source_person_type'] = relates_df['source_person_type'].str.split('PERSON_TYPE_').str[-1]
+        relates_df['target_person_type'] = relates_df['target_person_type'].str.split('PERSON_TYPE_').str[-1]
+        relates_df['exposureTypeId'] =  relates_df['exposureTypeId'] .str.split('EXPOSURE_TYPE_').str[-1]
+        relates_df['socialRelationshipTypeId'] = relates_df['socialRelationshipTypeId'] .str.split('TRANSMISSION_').str[-1]
+        relates_df['exposureDurationId'] = relates_df['exposureDurationId'] .str.split('DURATION_').str[-1]
+        relates_df['exposureFrequencyId'] = relates_df['exposureFrequencyId'] .str.split('FREQUENCY_').str[-1]
+        relates_df['certaintyLevelId'] = relates_df['certaintyLevelId'] .str.split('CERTAINTY_LEVEL_').str[-1]
+        relates_df = getVisualIds(relates_df, contacts_df, 'target')
+        relates_df = getVisualIds(relates_df, cases_df, 'source')
+        
+        # setup relationships for join to contacts
+        # relates_join = relates_df[['exposureTypeId', 'socialRelationshipTypeId', 'exposureDurationId'
+        #                                 ,'exposureFrequencyId','certaintyLevelId','id']].copy()
+        # relates_join.rename(columns = {'id':'relationshipId'}, inplace = True)
+        
+        # output relationships data (no joins) 
+        relate_model = list(get_FieldNameUpdater('relationship_data')['attributes'].keys())
+        relate_model = [c for c in relate_model if c in list(relates_df.columns)] 
+        relates_out = relates_df.filter(relate_model)  # reducing the columns
+        relates_out = relates_out[relate_model]        # reordering the columns
+        updateDates(date_flds, dt_flds, relates_out)
+        relates_out.to_csv(full_job_path.joinpath('Relationships.csv'), index=False)
+
+        #prep locations file for join using the lowest level admin that is found in the cases data
+        admin_level = cases_df['adminLevel'].max()
+        location_flds = [f'admin_{i}_name' for i in range(int(admin_level)+1)]
+        location_flds.extend([f'admin_{admin_level}_LocationId', f'admin_{admin_level}_Lat', f'admin_{admin_level}_Lng'])
+        locations_join = locations_out[location_flds].copy()
+        locations_join.rename(columns = {f'admin_{admin_level}_Lat':'Lat',
+                                        f'admin_{admin_level}_Lng':'Lng'}, inplace=True)
+        
+        # Join Locations to Cases and output cases
+        cases_df = pd.merge(cases_df, locations_join, how='left', left_on='locationId', right_on=f'admin_{admin_level}_LocationId')
+        case_model = list(get_FieldNameUpdater('case_level_data')['attributes'].keys())
+        case_model = [c for c in case_model if c in list(cases_df.columns) ] #take the fieldnames from case_model that are also in the dataframe
+        cases_df = cases_df.filter(case_model)
+        cases_df = cases_df[case_model]
+        cases_df.to_csv(full_job_path.joinpath('Cases.csv'), index=False ) 
+
+        # Join Locations to Followups and output followups
+        followups_df = pd.merge(followups_df, locations_join, how='left', left_on='locationId', right_on=f'admin_{admin_level}_LocationId')
+        followup_model = list(get_FieldNameUpdater('followup_data')['attributes'].keys())
+        followup_model = [c for c in followup_model if c in list(followups_df.columns)]
+        followups_df = followups_df.filter(followup_model)
+        followups_df = followups_df[followup_model]
+        followups_df.to_csv(full_job_path.joinpath('Followups.csv'), index=False)
+        
+        # # Join Locations, Outbreaks, and Relationships to Contacts and output contacts
+        contacts_df = pd.merge(contacts_df, locations_join, how='left', left_on='locationId', right_on=f'admin_{admin_level}_LocationId')
+        # contacts_df = pd.merge(contacts_df, relates_join, how='left', left_on='relationshipId', right_on='relationshipId')
+        # #contacts_df = pd.merge(contacts_df, cases_join, how='left', left_on='id', right_on='casesId')
+        contact_model = list(get_FieldNameUpdater('contact_data')['attributes'].keys())
+        contact_model = [c for c in contact_model if c in list(contacts_df.columns)]
+        contacts_df = contacts_df.filter(contact_model)
+        contacts_df=contacts_df[contact_model]
+        contacts_df.to_csv(full_job_path.joinpath('Contacts.csv'), index=False)
+
 
         start_date = min(list([datetime.strptime(c['dateOfReporting'], dte_format).date() for c in new_cases]))
 
