@@ -12,13 +12,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import pandas as pd
 
-def create_working_directory(in_loc):
+def create_working_directory(in_loc, summary=True):
     now_ts = datetime.now().strftime('%Y%m%d%H%M%S')
     
     # current_wd = Path(os.path.dirname(os.path.realpath(__file__)))
     output_path = Path(in_loc)
     
-    job_ws_foldername = f'GoData CSVs - {now_ts}'
+    if summary:
+        job_ws_foldername = f'GoData Summary Data - {now_ts}'
+    else:
+        job_ws_foldername = f'GoData Raw Data - {now_ts}'
 
     full_job_path = output_path.joinpath(job_ws_foldername)
     full_job_path.mkdir()
@@ -159,7 +162,7 @@ def convert_cases_json_to_csv(cases, ref_data):
         for key in keys:
             if key == 'age':
                 feature['age'] = case[key]['years']
-                feature['age_months'] = case[key]['months']
+                #feature['age_months'] = case[key]['months']
             elif key == 'addresses':
                 address = case[key][0]
                 location_id = address['locationId']
@@ -172,12 +175,9 @@ def convert_cases_json_to_csv(cases, ref_data):
                 if 'addressLine1' in address:
                     feature['addressLine1'] = address['addressLine1']  
             elif key == 'locations':
-                location = case[key][0]
-                feature['adminLevel'] = location['geographicalLevelId'].split('_')[-1]
-                #feature['locationId'] = location['id']
-                # if 'geoLocation' in location:
-                #     feature['Lat'] = location['geoLocation']['lat']
-                #     feature['Lng'] = location['geoLocation']['lng'] 
+                if len(case[key]) > 0:
+                    location = case[key][0]
+                    feature['adminLevel'] = location['geographicalLevelId'].split('_')[-1]
             elif key == 'dob':
                 feature['dateOfBurial'] = case[key]
             elif key == 'vaccinesReceived':
@@ -189,10 +189,8 @@ def convert_cases_json_to_csv(cases, ref_data):
                 case_value = case[key]
                 if isinstance(case_value, str) and 'LNG_' in case_value:
                     feature[f'{key}_code'] = case_value
-                    case_value = get_value_from_code(case_value, ref_data)
-                
-                feature[key] = case_value
-                
+                    case_value = get_value_from_code(case_value, ref_data)               
+                feature[key] = case_value               
         features.append(feature)
     return features
 
@@ -210,8 +208,7 @@ def convert_loc_json_to_csv(locations, ref_data):
                 if isinstance(loc_value, str) and 'LNG_' in loc_value:
                     feature[f'{key}_code'] = loc_value
                     loc_value = get_value_from_code(loc_value, ref_data)
-                feature[key] = loc_value
-         
+                feature[key] = loc_value        
         features.append(feature)
     return features
 
@@ -227,7 +224,7 @@ def convert_contacts_json_to_csv(contacts, ref_data):
                 feature['dateFollowUpEnd'] = contact[key]['endDate']
             elif key == 'age':
                 feature['age'] = contact[key]['years']
-                feature['age_months'] = contact[key]['months']
+               # feature['age_months'] = contact[key]['months']
             elif key == 'addresses':
                 address = contact[key][0]
                 location_id = address['locationId']
@@ -331,15 +328,10 @@ def get_attribute_model(in_model):
         'cases_by_reporting_area':  {
             'attributes': { 
                 'locationId': None,
-                'DAILY_NEW_CONFIRMED_PROBABLE': None,
-                'CUM_CONFIRMED_PROBABLE': None,
-                'SUSPECT_LAST_SEVEN': None,
+                'DAILY_NEW_CONFIRMED': None,
+                'CUM_CONFIRMED': None,
                 'CONFIRMED_LAST_SEVEN': None,
-                'PROBABLE_LAST_SEVEN': None,
-                'TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN': None,
                 'CONFIRMED_LAST_FOURTEEN': None,
-                'PROBABLE_LAST_FOURTEEN': None,
-                'TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN': None
             }
         },
         'deaths_by_reporting_area':  {
@@ -353,17 +345,24 @@ def get_attribute_model(in_model):
         'pctchg_by_reporting_area': {
             'attributes': {
                 'locationId': None,
-                'AVG_CONFIRMED_PROBABLE_LAST_SEVEN': None,
-                'AVG_CONFIRMED_PROBABLE_LAST_FOURTEEN': None,
-                'AVG_CONFIRMED_PROBABLE_EIGHT_TO_FOURTEEN': None,
-                'AVG_CONFIRMED_PROBABLE_FIFTEEN_TO_TWENTY_EIGHT': None,
+                'AVG_CONFIRMED_LAST_SEVEN': None,
+                'AVG_CONFIRMED_LAST_FOURTEEN': None,
+                'AVG_CONFIRMED_EIGHT_TO_FOURTEEN': None,
+                'AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT': None,
                 'PERCENT_CHANGE_RECENT_SEVEN': None,
                 'PERCENT_CHANGE_RECENT_FOURTEEN': None
             }
+        },
+        'active_contacts_by_reporting_area': {
+            'attributes': {
+                'locationId': None,
+                'locationName': None,
+                'UNDER_FOLLOWUP_PREVIOUS_DAY': None,
+                'UNDER_FOLLOWUP_LAST_SEVEN': None,
+                'UNDER_FOLLOWUP_LAST_FOURTEEN': None,
+            }
         }
     }
-
-
     return attribute_models[in_model]
 
 def get_FieldNameUpdater(in_model):
@@ -419,9 +418,6 @@ def get_FieldNameUpdater(in_model):
                 'id':'id',
                 'visualId':'visual_id',
                 'classification':'classification',
-                'followUpStatus':'follow_up_status',
-                'followUpStatusPast7Days': '',
-                'followUpStatusPast14Days': '',
                 'firstName':'first_name',
                 'middleName':'middle_name',
                 'lastName':'last_name',
@@ -429,10 +425,14 @@ def get_FieldNameUpdater(in_model):
                 'age':'age',
                 'ageClass':'age_class',
                 'occupation':'occupation',
+                'vaccinated':'vaccinated',
                 'pregnancyStatus':'pregnancy_status',
                 'dateOfReporting':'date_of_reporting',
                 'dateOfLastContact':'date_of_last_contact',
                 'dateOfBurial':'date_of_burial',
+                'followUpStatus':'follow_up_status',
+                'followUpStatusPast7Days': '',
+                'followUpStatusPast14Days': '',
                 'dateFollowUpStart':'date_of_follow_up_start',
                 'dateFollowUpEnd':'date_of_follow_up_end',
                 'wasCase':'was_case',
@@ -441,6 +441,7 @@ def get_FieldNameUpdater(in_model):
                 'safeBurial':'safe_burial',
                 'responsibleUserId':'responsible_user_id',
                 'followUpTeamId':'follow_up_team_id',
+                'locationId':'location_id',
                 'admin_0_name':'admin_0_name',
                 'admin_1_name':'admin_1_name',
                 'admin_2_name':'admin_2_name',
@@ -453,8 +454,6 @@ def get_FieldNameUpdater(in_model):
                 'city':'city',
                 'phoneNumber':'telephone',
                 'email':'email',
-                'vaccinated':'vaccinated',
-                'locationId':'location_id',
                 'createdBy':'created_by',
                 'createdAt':'datetime_created_at',
                 'updatedBy':'updated_by',
@@ -472,6 +471,7 @@ def get_FieldNameUpdater(in_model):
                 'targeted':'targeted',
                 'responsibleUserId':'responsible_user_id',
                 'teamId': 'team_id',
+                'locationId':'location_id',
                 'admin_0_name':'admin_0_name',
                 'admin_1_name':'admin_1_name',
                 'admin_2_name':'admin_2_name',
@@ -484,7 +484,6 @@ def get_FieldNameUpdater(in_model):
                 'city':'city',
                 'phoneNumber':'telephone',
                 'email':'email',
-                'locationId':'location_id',
                 'createdBy':'created_by',
                 'createdAt':'datetime_created_at',
                 'updatedBy':'updated_by',
@@ -780,17 +779,25 @@ class CreateSITREPTables(object):
             parameterType="Required",
             direction="Input")
 
-        # Output Folder for CSV files
-        param_output_folder = arcpy.Parameter(
-            displayName="Output folder for CSVs",
-            name="in_outcsvfolder",
+        # Output Folder for CSV Summary files
+        param_output_summary_folder = arcpy.Parameter(
+            displayName="Output folder for Summary Data CSVs",
+            name="in_gd_outcsvsummfolder",
+            datatype="DEFolder",
+            parameterType="Required",
+            direction="Input")
+
+        # Output Folder for CSV Raw files
+        param_output_raw_folder = arcpy.Parameter(
+            displayName="Output folder for Raw Data CSVs",
+            name="in_gd_outcsvrawfolder",
             datatype="DEFolder",
             parameterType="Required",
             direction="Input")
 
         # Output Workspace
         param_outworkspace = arcpy.Parameter(
-            displayName="Output Workspace",
+            displayName="Output Features and Tables to FGDB",
             name="in_outputfcworkspace",
             datatype="DEWorkspace",
             parameterType="Optional",
@@ -844,7 +851,7 @@ class CreateSITREPTables(object):
         param_geojoinfield.enabled = False
         param_keepallgeo.enabled = False
 
-        return [param_url, param_username, param_password, param_outbreak, param_output_folder, param_outworkspace, param_joingeo, param_geolayer, param_geojoinfield, param_keepallgeo, param_outputfcpaths]
+        return [param_url, param_username, param_password, param_outbreak, param_output_summary_folder, param_output_raw_folder, param_outworkspace, param_joingeo, param_geolayer, param_geojoinfield, param_keepallgeo, param_outputfcpaths]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -883,9 +890,9 @@ class CreateSITREPTables(object):
             selected_outbreak_id = outbreaks_cache[parameters[3].value]
 
 
-        parameters[7].enabled = parameters[6].value
-        parameters[8].enabled = parameters[6].value
-        parameters[9].enabled = parameters[6].value
+        parameters[8].enabled = parameters[7].value
+        parameters[9].enabled = parameters[7].value
+        parameters[10].enabled = parameters[7].value
        
         return
 
@@ -906,16 +913,20 @@ class CreateSITREPTables(object):
         in_gd_api_url = parameters[0].valueAsText
         in_gd_username = parameters[1].valueAsText
         in_gd_password = parameters[2].valueAsText
-        in_gd_outcsvfolder = parameters[4].valueAsText
-        in_gd_outworkspace = parameters[5].valueAsText
-        in_gd_shouldjoin = parameters[6].value    
-        in_gd_geolayer = parameters[7].value
-        in_gd_geojoinfield = parameters[8].valueAsText
-        in_gd_shouldkeepallgeo = parameters[9].value
+        in_gd_outcsvsummfolder = parameters[4].valueAsText
+        in_gd_outcsvrawfolder = parameters[5].valueAsText
+        in_gd_outworkspace = parameters[6].valueAsText
+        in_gd_shouldjoin = parameters[7].value    
+        in_gd_geolayer = parameters[8].value
+        in_gd_geojoinfield = parameters[9].valueAsText
+        in_gd_shouldkeepallgeo = parameters[10].value
 
-        wd_res = create_working_directory(in_gd_outcsvfolder)
-        full_job_path = wd_res[0]
-        now_ts = wd_res[1]
+        wd_summ = create_working_directory(in_gd_outcsvsummfolder)
+        full_job_path_summ = wd_summ[0]
+        now_ts = wd_summ[1]
+
+        wd_raw = create_working_directory(in_gd_outcsvrawfolder, summary=False)
+        full_job_path_raw = wd_raw[0]
         output_paths = []  
 
         in_gd_outbreak = selected_outbreak_id
@@ -1010,7 +1021,7 @@ class CreateSITREPTables(object):
             i+=1
 
         locations_out.dropna('columns', how='all', inplace=True)
-        locations_out.to_csv(full_job_path.joinpath('Locations.csv'), encoding='utf-8-sig', index=False)
+        locations_out.to_csv(full_job_path_raw.joinpath('Locations.csv'), encoding='utf-8-sig', index=False)
 
         # get outbreak cases
         arcpy.SetProgressor('default', 'Getting Outbreak Cases')
@@ -1025,10 +1036,6 @@ class CreateSITREPTables(object):
         cases_df['outcomeId'] = cases_df['outcomeId'].str.split('OUTCOME_').str[-1]    
         updateDates(date_flds, dt_flds, cases_df)
         cases_df['ageClass'] = pd.cut(cases_df['age'], bins=age_bins, labels=age_labels)
-        
-        # # subset cases data for join to contacts
-        # cases_join = cases_df[['id', 'classification', 'transferRefused', 'outcomeId']].copy()
-        # cases_join.rename(columns={'id':'casesId'}, inplace=True)
 
         # get contacts
         arcpy.SetProgressor('default', 'Getting Contact Data')
@@ -1038,7 +1045,6 @@ class CreateSITREPTables(object):
         contacts_df['gender'] = contacts_df['gender'].str.split('GENDER_').str[-1]
         contacts_df['occupation'] = contacts_df['occupation'].str.split('OCCUPATION_').str[-1]
         contacts_df['pregnancyStatus'] = contacts_df['pregnancyStatus'].str.split('PREGNANCY_STATUS_').str[-1]
-        #contacts_df['followUpStatus'] = contacts_df['followUpStatus'].str.split('STATUS_TYPE_').str[-1]
         contacts_df['riskLevel'] = contacts_df['riskLevel'].str.split('RISK_LEVEL_').str[-1]
         updateDates(date_flds, dt_flds, contacts_df)
         contacts_df['ageClass'] = pd.cut(contacts_df['age'], bins=age_bins, labels=age_labels)
@@ -1066,18 +1072,13 @@ class CreateSITREPTables(object):
         relates_df = pd.DataFrame(new_relates)
         relates_df['source_person_type'] = relates_df['source_person_type'].str.split('PERSON_TYPE_').str[-1]
         relates_df['target_person_type'] = relates_df['target_person_type'].str.split('PERSON_TYPE_').str[-1]
-        relates_df['exposureTypeId'] =  relates_df['exposureTypeId'] .str.split('EXPOSURE_TYPE_').str[-1]
+        relates_df['exposureTypeId'] =  relates_df['exposureTypeId'].str.split('EXPOSURE_TYPE_').str[-1]
         relates_df['socialRelationshipTypeId'] = relates_df['socialRelationshipTypeId'] .str.split('TRANSMISSION_').str[-1]
-        relates_df['exposureDurationId'] = relates_df['exposureDurationId'] .str.split('DURATION_').str[-1]
-        relates_df['exposureFrequencyId'] = relates_df['exposureFrequencyId'] .str.split('FREQUENCY_').str[-1]
-        relates_df['certaintyLevelId'] = relates_df['certaintyLevelId'] .str.split('CERTAINTY_LEVEL_').str[-1]
+        relates_df['exposureDurationId'] = relates_df['exposureDurationId'].str.split('DURATION_').str[-1]
+        relates_df['exposureFrequencyId'] = relates_df['exposureFrequencyId'].str.split('FREQUENCY_').str[-1]
+        relates_df['certaintyLevelId'] = relates_df['certaintyLevelId'].str.split('CERTAINTY_LEVEL_').str[-1]
         relates_df = getVisualIds(relates_df, contacts_df, 'target')
         relates_df = getVisualIds(relates_df, cases_df, 'source')
-        
-        # setup relationships for join to contacts
-        # relates_join = relates_df[['exposureTypeId', 'socialRelationshipTypeId', 'exposureDurationId'
-        #                                 ,'exposureFrequencyId','certaintyLevelId','id']].copy()
-        # relates_join.rename(columns = {'id':'relationshipId'}, inplace = True)
         
         # output relationships data (no joins) 
         relate_model = list(get_FieldNameUpdater('relationship_data')['attributes'].keys())
@@ -1085,9 +1086,10 @@ class CreateSITREPTables(object):
         relates_out = relates_df.filter(relate_model)  # reducing the columns
         relates_out = relates_out[relate_model]        # reordering the columns
         updateDates(date_flds, dt_flds, relates_out)
-        relates_out.to_csv(full_job_path.joinpath('Relationships.csv'), index=False)
+        relates_out.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
 
         #prep locations file for join using the lowest level admin that is found in the cases data
+        cases_df['adminLevel'] = cases_df['adminLevel'].astype(int)
         admin_level = cases_df['adminLevel'].max()
         location_flds = [f'admin_{i}_name' for i in range(int(admin_level)+1)]
         location_flds.extend([f'admin_{admin_level}_LocationId', f'admin_{admin_level}_Lat', f'admin_{admin_level}_Lng'])
@@ -1101,7 +1103,7 @@ class CreateSITREPTables(object):
         case_model = [c for c in case_model if c in list(cases_df.columns) ] #take the fieldnames from case_model that are also in the dataframe
         cases_df = cases_df.filter(case_model)
         cases_df = cases_df[case_model]
-        cases_df.to_csv(full_job_path.joinpath('Cases.csv'), index=False ) 
+        cases_df.to_csv(full_job_path_raw.joinpath('Cases.csv'), index=False ) 
 
         # Join Locations to Followups and output followups
         followups_df = pd.merge(followups_df, locations_join, how='left', left_on='locationId', right_on=f'admin_{admin_level}_LocationId')
@@ -1109,17 +1111,15 @@ class CreateSITREPTables(object):
         followup_model = [c for c in followup_model if c in list(followups_df.columns)]
         followups_df = followups_df.filter(followup_model)
         followups_df = followups_df[followup_model]
-        followups_df.to_csv(full_job_path.joinpath('Followups.csv'), index=False)
+        followups_df.to_csv(full_job_path_raw.joinpath('Followups.csv'), index=False)
         
-        # # Join Locations, Outbreaks, and Relationships to Contacts and output contacts
+        # # Join Locations to Contacts and output contacts
         contacts_df = pd.merge(contacts_df, locations_join, how='left', left_on='locationId', right_on=f'admin_{admin_level}_LocationId')
-        # contacts_df = pd.merge(contacts_df, relates_join, how='left', left_on='relationshipId', right_on='relationshipId')
-        # #contacts_df = pd.merge(contacts_df, cases_join, how='left', left_on='id', right_on='casesId')
         contact_model = list(get_FieldNameUpdater('contact_data')['attributes'].keys())
         contact_model = [c for c in contact_model if c in list(contacts_df.columns)]
         contacts_df = contacts_df.filter(contact_model)
         contacts_df=contacts_df[contact_model]
-        contacts_df.to_csv(full_job_path.joinpath('Contacts.csv'), index=False)
+        contacts_df.to_csv(full_job_path_raw.joinpath('Contacts.csv'), index=False)
 
 
         start_date = min(list([datetime.strptime(c['dateOfReporting'], dte_format).date() for c in new_cases]))
@@ -1135,71 +1135,72 @@ class CreateSITREPTables(object):
     
             # yesterday
             if reporting_date == yesterday:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED' or case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    increment_count(feature, 'DAILY_NEW_CONFIRMED_PROBABLE')
+                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                    increment_count(feature, 'DAILY_NEW_CONFIRMED')
    
-    
+            # cumulative
             if reporting_date >= start_date:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED' or case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    increment_count(feature, 'CUM_CONFIRMED_PROBABLE')                    
-    
+                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                    increment_count(feature, 'CUM_CONFIRMED')                    
+
+            #last week
             if reporting_date >= last_week:
-                conf = None
-                prob = None
+                # conf = None
+                # prob = None
         
                 if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    cnt = increment_count(feature, 'CONFIRMED_LAST_SEVEN')
-                    conf = cnt
-                elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    cnt = increment_count(feature, 'PROBABLE_LAST_SEVEN')
-                    prob = cnt
+                    increment_count(feature, 'CONFIRMED_LAST_SEVEN')
+                    # conf = cnt
+                # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
+                #     cnt = increment_count(feature, 'PROBABLE_LAST_SEVEN')
+                #     prob = cnt
 
-                elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_SUSPECT':
-                    increment_count(feature, 'SUSPECT_LAST_SEVEN')
+                # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_SUSPECT':
+                #     increment_count(feature, 'SUSPECT_LAST_SEVEN')
         
-                if prob is not None or conf is not None:
-                    if prob is None:
-                        prob = 0
-                    if conf is None:
-                        conf = 0
+                # if prob is not None or conf is not None:
+                #     if prob is None:
+                #         prob = 0
+                #     if conf is None:
+                #         conf = 0
                 
-                    current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN']
-                    if current_count is None:
-                        current_count = 0
-                        feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = 0
+                    #current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN']
+                    # if current_count is None:
+                    #     current_count = 0
+                    #     feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = 0
             
-                    feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = current_count + (prob + conf)
+                    # feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = current_count + (prob + conf)
 
             if reporting_date >= last_two_weeks:
-                conf = None
-                prob = None
+                # conf = None
+                # prob = None
         
                 if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    cnt = increment_count(feature, 'CONFIRMED_LAST_FOURTEEN')
-                    conf = cnt
-                elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    cnt = increment_count(feature, 'PROBABLE_LAST_FOURTEEN')
-                    prob = cnt
+                    increment_count(feature, 'CONFIRMED_LAST_FOURTEEN')
+                    #conf = cnt
+                # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
+                #     cnt = increment_count(feature, 'PROBABLE_LAST_FOURTEEN')
+                #     prob = cnt
             
-                if prob is not None or conf is not None:
-                    if prob is None:
-                        prob = 0
-                    if conf is None:
-                        conf = 0
+                # if prob is not None or conf is not None:
+                #     if prob is None:
+                #         prob = 0
+                #     if conf is None:
+                #         conf = 0
                 
-                    current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN']
-                    if current_count is None:
-                        current_count = 0
-                        feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = 0
+                #     current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN']
+                #     if current_count is None:
+                #         current_count = 0
+                #         feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = 0
             
-                    feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = current_count + (prob + conf)
+                #     feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = current_count + (prob + conf)
 
         # convert features back to csv_rows
         headers, cases_by_rep_csv_rows = convert_features_to_csv(features)
 
         # create cases CSV
         arcpy.SetProgressor('default', 'Creating Cases CSV file ...')
-        path_to_csv_file = create_csv_file(cases_by_rep_csv_rows, 'Cases_by_Reporting_Area.csv', headers, full_job_path)
+        path_to_csv_file = create_csv_file(cases_by_rep_csv_rows, 'Cases_by_Reporting_Area.csv', headers, full_job_path_summ)
 
         # create cases FC table
         arcpy.SetProgressor('default', 'Creating Cases feature class table ...')
@@ -1257,7 +1258,7 @@ class CreateSITREPTables(object):
 
         # create deaths CSV
         arcpy.SetProgressor('default', 'Creating Deaths by Reporting Area CSV file ...')
-        path_to_csv_file = create_csv_file(deaths_by_rep_csv_rows, 'Deaths_by_Reporting_Area.csv', headers, full_job_path)
+        path_to_csv_file = create_csv_file(deaths_by_rep_csv_rows, 'Deaths_by_Reporting_Area.csv', headers, full_job_path_summ)
 
         # create deaths FC table
         arcpy.SetProgressor('default', 'Creating Deaths by Reporting Area feature class table ...')
@@ -1284,60 +1285,60 @@ class CreateSITREPTables(object):
                         unique_location_ids.append(c[k])
 
         pctchg_features = []
-        sum_conf_prob_7 = 0
-        sum_conf_prob_14 = 0
-        sum_conf_prob_8_14 = 0
-        sum_conf_prob_15_28 = 0
+        # sum_conf_prob_7 = 0
+        # sum_conf_prob_14 = 0
+        # sum_conf_prob_8_14 = 0
+        # sum_conf_prob_15_28 = 0
 
         for case in new_cases:
             location_id = case['locationId']
     
             reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
-            reporting_date_fm = reporting_date.strftime('%Y-%m-%d')
+           #reporting_date_fm = reporting_date.strftime('%Y-%m-%d')
         
             feature = get_feature(location_id, pctchg_features, 'pctchg_by_reporting_area')                   
     
             if reporting_date >= last_week:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED' or case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    increment_count(feature, 'AVG_CONFIRMED_PROBABLE_LAST_SEVEN')
+                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                    increment_count(feature, 'AVG_CONFIRMED_LAST_SEVEN')
                 
             if reporting_date >= last_two_weeks:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED' or case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    increment_count(feature, 'AVG_CONFIRMED_PROBABLE_LAST_FOURTEEN')
+                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                    increment_count(feature, 'AVG_CONFIRMED_LAST_FOURTEEN')
             
             if eight_days_ago >= reporting_date >= last_two_weeks:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED' or case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    increment_count(feature, 'AVG_CONFIRMED_PROBABLE_EIGHT_TO_FOURTEEN')
+                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                    increment_count(feature, 'AVG_CONFIRMED_EIGHT_TO_FOURTEEN')
                         
             if fifteen_days_ago >= reporting_date >= twenty_eight_days_ago:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED' or case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    increment_count(feature, 'AVG_CONFIRMED_PROBABLE_FIFTEEN_TO_TWENTY_EIGHT')
+                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                    increment_count(feature, 'AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT')
 
         for feature in pctchg_features:
-            val = feature['attributes']['AVG_CONFIRMED_PROBABLE_LAST_SEVEN']
+            val = feature['attributes']['AVG_CONFIRMED_LAST_SEVEN']
             if val is not None:
-                feature['attributes']['AVG_CONFIRMED_PROBABLE_LAST_SEVEN'] = round(val / 7, 2)
+                feature['attributes']['AVG_CONFIRMED_LAST_SEVEN'] = round(val / 7, 2)
         
-            val = feature['attributes']['AVG_CONFIRMED_PROBABLE_LAST_FOURTEEN']
+            val = feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN']
             if val is not None:
-                feature['attributes']['AVG_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = round(val / 14, 2)
+                feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN'] = round(val / 14, 2)
     
-            val = feature['attributes']['AVG_CONFIRMED_PROBABLE_EIGHT_TO_FOURTEEN']
+            val = feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN']
             if val is not None:
-                feature['attributes']['AVG_CONFIRMED_PROBABLE_EIGHT_TO_FOURTEEN'] = round(val / 7, 2)
+                feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN'] = round(val / 7, 2)
         
-            val = feature['attributes']['AVG_CONFIRMED_PROBABLE_FIFTEEN_TO_TWENTY_EIGHT']
+            val = feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT']
             if val is not None:
-                feature['attributes']['AVG_CONFIRMED_PROBABLE_FIFTEEN_TO_TWENTY_EIGHT'] = round(val / 14, 2)
+                feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT'] = round(val / 14, 2)
         
-            val2 = feature['attributes']['AVG_CONFIRMED_PROBABLE_LAST_SEVEN']
-            val1 = feature['attributes']['AVG_CONFIRMED_PROBABLE_EIGHT_TO_FOURTEEN']
+            val2 = feature['attributes']['AVG_CONFIRMED_LAST_SEVEN']
+            val1 = feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN']
             if val2 is not None and val1 is not None and val2 > 0 and val1 > 0:
                 pct_chg = ((val2 - val1) / abs(val1)) * 100
                 feature['attributes']['PERCENT_CHANGE_RECENT_SEVEN'] = pct_chg
         
-            val2 = feature['attributes']['AVG_CONFIRMED_PROBABLE_LAST_FOURTEEN']
-            val1 = feature['attributes']['AVG_CONFIRMED_PROBABLE_FIFTEEN_TO_TWENTY_EIGHT']
+            val2 = feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN']
+            val1 = feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT']
             if val2 is not None and val1 is not None and val2 > 0 and val1 > 0:
                 pct_chg = ((val2 - val1) / abs(val1)) * 100
                 feature['attributes']['PERCENT_CHANGE_RECENT_FOURTEEN'] = pct_chg
@@ -1347,7 +1348,7 @@ class CreateSITREPTables(object):
 
         # create pct change CSV
         arcpy.SetProgressor('default', 'Creating Percent Change in New Cases by Reporting Area CSV file ...')
-        path_to_csv_file = create_csv_file(pct_by_rep_csv_rows, 'Percent_Change_in_New_Cases_by_Reporting_Area.csv', headers, full_job_path)
+        path_to_csv_file = create_csv_file(pct_by_rep_csv_rows, 'Percent_Change_in_New_Cases_by_Reporting_Area.csv', headers, full_job_path_summ)
 
         # create pct change FC table
         arcpy.SetProgressor('default', 'Creating Percent Change in New Cases by Reporting Area feature class table ...')
@@ -1364,9 +1365,33 @@ class CreateSITREPTables(object):
 
             output_paths.append(fc_path)
 
+        # Active Contacts Summary Table
+        arcpy.SetProgressor('default', 'Creating Contacts by Reporting Area CSV file ...')
+        output_filename = 'Contacts_by_Reporting_Area'
+        path_to_csv_file = full_job_path_summ.joinpath('Contacts_by_Reporting_Area.csv').resolve()
+        contacts_summary = contacts_df[['locationId' ,f'admin_{admin_level}_name','followUpStatus', 'followUpStatusPast7Days', 'followUpStatusPast14Days']].copy()
+        contacts_summary.replace({True:1,False:0}, inplace=True)
+        contacts_summary = contacts_summary.groupby(['locationId', f'admin_{admin_level}_name'])[['followUpStatus', 'followUpStatusPast7Days', 'followUpStatusPast14Days']].sum()
+        contacts_summary = contacts_summary.loc[contacts_summary.sum(axis=1)>0]
+        contacts_summary.reset_index(inplace=True)
+        unique_location_ids = list(set(contacts_summary['locationId'].unique()))
+        contacts_summary.to_csv(path_to_csv_file, index=False)
+        
+        arcpy.SetProgressor('default', 'Creating Contacts_by_Reporting_Area feature class table ...')
+        err = create_fc_table(str(path_to_csv_file), in_gd_outworkspace, output_filename)
+        if err is not None:
+            arcpy.AddError(error)
+
+        # join to geography
+        if in_gd_shouldjoin:
+            err, fc_path = join_to_geo(path_to_csv_file, in_gd_outworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, 'Contacts_by_Reporting_Area', unique_location_ids)
+            if err is not None:
+                arcpy.AddError(err)
+
+            output_paths.append(fc_path)
 
         if len(output_paths) > 0:
             # set the output parameter
-            arcpy.SetParameter(10, ';'.join(output_paths))
+            arcpy.SetParameter(11, ';'.join(output_paths))
         
         return 
