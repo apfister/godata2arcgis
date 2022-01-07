@@ -91,7 +91,7 @@ def get_ref_data(in_gd_api_url, token):
 def get_cases(outbreak_id, in_gd_api_url, token):
     params = {
         "access_token": token,
-        "filter": json.dumps({"where":{"and":[{"classification":{"neq":"LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_NOT_A_CASE_DISCARDED"}}],"countRelations":True},"include":[{"relation":"dateRangeLocations","scope":{"filterParent":False,"justFilter":False}},{"relation":"createdByUser","scope":{"filterParent":False,"justFilter":False}},{"relation":"updatedByUser","scope":{"filterParent":False,"justFilter":False}},{"relation":"locations","scope":{"filterParent":False,"justFilter":False}}],"limit":0,"skip":0})
+        #"filter": json.dumps({"where":{"and":[{"classification":{"neq":"LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_NOT_A_CASE_DISCARDED"}}],"countRelations":True},"include":[{"relation":"dateRangeLocations","scope":{"filterParent":False,"justFilter":False}},{"relation":"createdByUser","scope":{"filterParent":False,"justFilter":False}},{"relation":"updatedByUser","scope":{"filterParent":False,"justFilter":False}},{"relation":"locations","scope":{"filterParent":False,"justFilter":False}}],"limit":0,"skip":0})
     }
     case_data = requests.get(f'{in_gd_api_url}/api/outbreaks/{outbreak_id}/cases', params=params)
     case_data_json = case_data.json()
@@ -201,8 +201,11 @@ def convert_loc_json_to_csv(locations, ref_data):
         keys = loc.keys()
         for key in keys:
             if key == 'geoLocation':
-                feature['Lat'] = loc[key]['lat']
-                feature['Lng'] = loc[key]['lng']    
+                if loc[key] == None:
+                    pass
+                else:
+                    feature['Lat'] = loc[key]['lat']
+                    feature['Lng'] = loc[key]['lng']    
             elif not isinstance(loc[key], collections.abc.Mapping) and not isinstance(loc[key], list):
                 loc_value = loc[key]
                 if isinstance(loc_value, str) and 'LNG_' in loc_value:
@@ -969,14 +972,15 @@ class CreateSITREPTables(object):
                     pass
         
         def getVisualIds(rel_df, right_df, person_type):
-            if 'visualId' in list(right_df.columns):
+            if (len(rel_df)==0) or (len(right_df)==0):
+                return rel_df
+            if 'visualId' in right_df.columns:
                 visual_ids = right_df[['id', 'visualId']].copy()
                 visual_ids.drop_duplicates(inplace=True)
                 visual_ids.rename(columns = {'id':f'{person_type}_person_id',
                                                 'visualId':f'{person_type}_person_visual_id'}, inplace=True)
                 return pd.merge(rel_df, visual_ids, how='left', left_on= f'{person_type}_person_id', right_on=f'{person_type}_person_id')
-
-
+                
         # get reference codes & labels
         # e.g. LNG_REFERENCE_DATA_CATEGORY_OUTCOME_ALIVE = 'Alive'
         arcpy.SetProgressor('default', 'Getting Go.Data reference data')
@@ -992,7 +996,7 @@ class CreateSITREPTables(object):
         locations_df['adminLevel'] = locations_df['geographicalLevelId'].str.split('_').str[-1]
         locations_df.loc[locations_df['adminLevel'].isna(), 'adminLevel'] = 99
         locations_df['adminLevel'] = locations_df['adminLevel'].astype(int)
-        
+        admin_level = locations_df['adminLevel'].max()
         #transpose locations data
         i = 0
         while i < 6:
@@ -1023,31 +1027,41 @@ class CreateSITREPTables(object):
         locations_out.dropna('columns', how='all', inplace=True)
         locations_out.to_csv(full_job_path_raw.joinpath('Locations.csv'), encoding='utf-8-sig', index=False)
 
+        def fieldValueSplitter(df, field, splitter, idx= -1):
+            if field in df.columns:
+                if df[field].isnull().all():
+                    pass
+                else:
+                    df[field] = df[field].str.split(splitter).str[idx]
+
         # get outbreak cases
         arcpy.SetProgressor('default', 'Getting Outbreak Cases')
         cases = get_cases(selected_outbreak_id, in_gd_api_url, token)
+        arcpy.AddMessage(cases)
         new_cases = convert_cases_json_to_csv(cases, ref_data)
         cases_df = pd.DataFrame(new_cases)
-        cases_df['classification'] = cases_df['classification'].str.split('CLASSIFICATION_').str[-1]
-        cases_df['gender'] = cases_df['gender'].str.split('GENDER_').str[-1]
-        cases_df['occupation'] = cases_df['occupation'].str.split('OCCUPATION_').str[-1]
-        cases_df['pregnancyStatus'] = cases_df['pregnancyStatus'].str.split('PREGNANCY_STATUS_').str[-1]
-        cases_df['riskLevel'] = cases_df['riskLevel'].str.split('RISK_LEVEL_').str[-1]
-        cases_df['outcomeId'] = cases_df['outcomeId'].str.split('OUTCOME_').str[-1]    
+        fieldValueSplitter(cases_df, 'classification', 'CLASSIFICATION_')
+        fieldValueSplitter(cases_df, 'gender', 'GENDER_')
+        fieldValueSplitter(cases_df, 'occupation', 'OCCUPATION_')
+        fieldValueSplitter(cases_df, 'pregnancyStatus', 'PREGNANCY_STATUS_')
+        fieldValueSplitter(cases_df, 'riskLevel', 'RISK_LEVEL_')
+        fieldValueSplitter(cases_df, 'outcomeId', 'OUTCOME_')
         updateDates(date_flds, dt_flds, cases_df)
-        cases_df['ageClass'] = pd.cut(cases_df['age'], bins=age_bins, labels=age_labels)
+        if 'age' in cases_df.columns:
+            cases_df['ageClass'] = pd.cut(cases_df['age'], bins=age_bins, labels=age_labels)
 
         # get contacts
         arcpy.SetProgressor('default', 'Getting Contact Data')
         contact_data = get_contacts(selected_outbreak_id, in_gd_api_url, token)
         new_contacts = convert_contacts_json_to_csv(contact_data, ref_data)
         contacts_df = pd.DataFrame(new_contacts)
-        contacts_df['gender'] = contacts_df['gender'].str.split('GENDER_').str[-1]
-        contacts_df['occupation'] = contacts_df['occupation'].str.split('OCCUPATION_').str[-1]
-        contacts_df['pregnancyStatus'] = contacts_df['pregnancyStatus'].str.split('PREGNANCY_STATUS_').str[-1]
-        contacts_df['riskLevel'] = contacts_df['riskLevel'].str.split('RISK_LEVEL_').str[-1]
+        fieldValueSplitter(contacts_df, 'gender', 'GENDER_')
+        fieldValueSplitter(contacts_df, 'occupation', 'OCCUPATION_')
+        fieldValueSplitter(contacts_df, 'pregnancyStatus', 'PREGNANCY_STATUS_')
+        fieldValueSplitter(contacts_df, 'riskLevel', 'RISK_LEVEL_')
         updateDates(date_flds, dt_flds, contacts_df)
-        contacts_df['ageClass'] = pd.cut(contacts_df['age'], bins=age_bins, labels=age_labels)
+        if 'age' in contacts_df.columns:
+            contacts_df['ageClass'] = pd.cut(contacts_df['age'], bins=age_bins, labels=age_labels)
         contacts_df['dateFollowUpStart'] = pd.to_datetime(contacts_df['dateFollowUpStart']).dt.date
         contacts_df['dateFollowUpEnd'] = pd.to_datetime(contacts_df['dateFollowUpEnd']).dt.date
         contacts_df.loc[(contacts_df['dateFollowUpStart']<= yesterday) & (contacts_df['dateFollowUpEnd'] >= right_now.date()), ['followUpStatus']] = True
@@ -1062,35 +1076,42 @@ class CreateSITREPTables(object):
         followup_data = get_followups(selected_outbreak_id, in_gd_api_url, token)
         new_followups = convert_followups_json_to_csv(followup_data, ref_data)
         followups_df = pd.DataFrame(new_followups)
-        followups_df['statusId'] = followups_df['statusId'].str.split('STATUS_TYPE_').str[-1]
-        updateDates(date_flds, dt_flds, followups_df)
+        if len(followups_df)>0:
+            fieldValueSplitter(followups_df, 'statusId', 'STATUS_TYPE_')
+            #followups_df['statusId'] = followups_df['statusId'].str.split('STATUS_TYPE_').str[-1]
+            updateDates(date_flds, dt_flds, followups_df)
+            arcpy.AddMessage(followups_df)
+        else: 
+            followups = False
 
         # get relationships
         arcpy.SetProgressor('default', 'Getting Relationship Data')
         relate_data = get_relationships(selected_outbreak_id, in_gd_api_url, token)
         new_relates = convert_relates_json_to_csv(relate_data, ref_data)
         relates_df = pd.DataFrame(new_relates)
-        relates_df['source_person_type'] = relates_df['source_person_type'].str.split('PERSON_TYPE_').str[-1]
-        relates_df['target_person_type'] = relates_df['target_person_type'].str.split('PERSON_TYPE_').str[-1]
-        relates_df['exposureTypeId'] =  relates_df['exposureTypeId'].str.split('EXPOSURE_TYPE_').str[-1]
-        relates_df['socialRelationshipTypeId'] = relates_df['socialRelationshipTypeId'] .str.split('TRANSMISSION_').str[-1]
-        relates_df['exposureDurationId'] = relates_df['exposureDurationId'].str.split('DURATION_').str[-1]
-        relates_df['exposureFrequencyId'] = relates_df['exposureFrequencyId'].str.split('FREQUENCY_').str[-1]
-        relates_df['certaintyLevelId'] = relates_df['certaintyLevelId'].str.split('CERTAINTY_LEVEL_').str[-1]
+        relate_cols = relates_df.columns
+        fieldValueSplitter(relates_df, 'source_person_type', 'PERSON_TYPE_')
+        fieldValueSplitter(relates_df, 'target_person_type', 'PERSON_TYPE_')
+        fieldValueSplitter(relates_df, 'exposureTypeId', 'exposureTypeId')
+        fieldValueSplitter(relates_df, 'socialRelationshipTypeId', 'TRANSMISSION_')
+        fieldValueSplitter(relates_df, 'exposureDurationId', 'DURATION_')
+        fieldValueSplitter(relates_df, 'exposureFrequencyId', 'FREQUENCY_')
+        fieldValueSplitter(relates_df, 'certaintyLevelId', 'CERTAINTY_LEVEL_')
         relates_df = getVisualIds(relates_df, contacts_df, 'target')
         relates_df = getVisualIds(relates_df, cases_df, 'source')
-        
         # output relationships data (no joins) 
         relate_model = list(get_FieldNameUpdater('relationship_data')['attributes'].keys())
-        relate_model = [c for c in relate_model if c in list(relates_df.columns)] 
+        relate_model = [c for c in relate_model if c in relates_df.columns] 
         relates_out = relates_df.filter(relate_model)  # reducing the columns
         relates_out = relates_out[relate_model]        # reordering the columns
         updateDates(date_flds, dt_flds, relates_out)
         relates_out.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
+        relates_df.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
 
         #prep locations file for join using the lowest level admin that is found in the cases data
-        cases_df['adminLevel'] = cases_df['adminLevel'].astype(int)
-        admin_level = cases_df['adminLevel'].max()
+
+        #cases_df['adminLevel'] = cases_df['adminLevel'].astype(int)
+        
         location_flds = [f'admin_{i}_name' for i in range(int(admin_level)+1)]
         location_flds.extend([f'admin_{admin_level}_LocationId', f'admin_{admin_level}_Lat', f'admin_{admin_level}_Lng'])
         locations_join = locations_out[location_flds].copy()
@@ -1106,12 +1127,15 @@ class CreateSITREPTables(object):
         cases_df.to_csv(full_job_path_raw.joinpath('Cases.csv'), index=False ) 
 
         # Join Locations to Followups and output followups
-        followups_df = pd.merge(followups_df, locations_join, how='left', left_on='locationId', right_on=f'admin_{admin_level}_LocationId')
-        followup_model = list(get_FieldNameUpdater('followup_data')['attributes'].keys())
-        followup_model = [c for c in followup_model if c in list(followups_df.columns)]
-        followups_df = followups_df.filter(followup_model)
-        followups_df = followups_df[followup_model]
-        followups_df.to_csv(full_job_path_raw.joinpath('Followups.csv'), index=False)
+        if followups:
+            followups_df = pd.merge(followups_df, locations_join, how='left', left_on='locationId', right_on=f'admin_{admin_level}_LocationId')
+            followup_model = list(get_FieldNameUpdater('followup_data')['attributes'].keys())
+            followup_model = [c for c in followup_model if c in list(followups_df.columns)]
+            followups_df = followups_df.filter(followup_model)
+            followups_df = followups_df[followup_model]
+            followups_df.to_csv(full_job_path_raw.joinpath('Followups.csv'), index=False)
+        else:
+            arcpy.AddMessage('There are no data for followups, skipping Followups.csv output')
         
         # # Join Locations to Contacts and output contacts
         contacts_df = pd.merge(contacts_df, locations_join, how='left', left_on='locationId', right_on=f'admin_{admin_level}_LocationId')
@@ -1253,12 +1277,14 @@ class CreateSITREPTables(object):
                 increment_count(feature, 'DEATHS_LAST_FOURTEEN')
 
 
-        # convert back to csv
-        headers, deaths_by_rep_csv_rows = convert_features_to_csv(deaths_features)
-
-        # create deaths CSV
-        arcpy.SetProgressor('default', 'Creating Deaths by Reporting Area CSV file ...')
-        path_to_csv_file = create_csv_file(deaths_by_rep_csv_rows, 'Deaths_by_Reporting_Area.csv', headers, full_job_path_summ)
+        if len(deaths_features) > 0:
+            # convert back to csv
+            headers, deaths_by_rep_csv_rows = convert_features_to_csv(deaths_features)
+            # create deaths CSV
+            arcpy.SetProgressor('default', 'Creating Deaths by Reporting Area CSV file ...')
+            path_to_csv_file = create_csv_file(deaths_by_rep_csv_rows, 'Deaths_by_Reporting_Area.csv', headers, full_job_path_summ)
+        else:
+            arcpy.AddMessage('No death data available.  Skipping Deaths_by_Reporting_Area.csv')
 
         # create deaths FC table
         arcpy.SetProgressor('default', 'Creating Deaths by Reporting Area feature class table ...')
