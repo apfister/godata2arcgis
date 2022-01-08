@@ -986,17 +986,17 @@ class CreateSITREPTables(object):
         arcpy.SetProgressor('default', 'Getting Go.Data reference data')
         ref_data = get_ref_data(in_gd_api_url, token)
 
-        #get location data 
+        #create locations_df
         arcpy.SetProgressor('default', 'Getting Locations')
         locations = get_locations(in_gd_api_url, token)
         new_locations = convert_loc_json_to_csv(locations, ref_data)
         locations_df = pd.DataFrame(new_locations)  
-        
-        #create int field: adminLevel
         locations_df['adminLevel'] = locations_df['geographicalLevelId'].str.split('_').str[-1]
-        locations_df.loc[locations_df['adminLevel'].isna(), 'adminLevel'] = 99
+        locations_df.loc[locations_df['adminLevel'].isna(), 'adminLevel'] = -1               
         locations_df['adminLevel'] = locations_df['adminLevel'].astype(int)
-        admin_level = locations_df['adminLevel'].max()
+        
+        
+        
         #transpose locations data
         i = 0
         while i < 6:
@@ -1027,6 +1027,7 @@ class CreateSITREPTables(object):
         locations_out.dropna('columns', how='all', inplace=True)
         locations_out.to_csv(full_job_path_raw.joinpath('Locations.csv'), encoding='utf-8-sig', index=False)
 
+        #splitting the reference data
         def fieldValueSplitter(df, field, splitter, idx= -1):
             if field in df.columns:
                 if df[field].isnull().all():
@@ -1034,12 +1035,12 @@ class CreateSITREPTables(object):
                 else:
                     df[field] = df[field].str.split(splitter).str[idx]
 
-        # get outbreak cases
+        # create cases_df
         arcpy.SetProgressor('default', 'Getting Outbreak Cases')
         cases = get_cases(selected_outbreak_id, in_gd_api_url, token)
-        arcpy.AddMessage(cases)
         new_cases = convert_cases_json_to_csv(cases, ref_data)
         cases_df = pd.DataFrame(new_cases)
+        cases_df.to_csv(r'C:\Users\Adam McKay\Desktop\WHO 2021\godata\cases_df.csv')
         fieldValueSplitter(cases_df, 'classification', 'CLASSIFICATION_')
         fieldValueSplitter(cases_df, 'gender', 'GENDER_')
         fieldValueSplitter(cases_df, 'occupation', 'OCCUPATION_')
@@ -1050,7 +1051,7 @@ class CreateSITREPTables(object):
         if 'age' in cases_df.columns:
             cases_df['ageClass'] = pd.cut(cases_df['age'], bins=age_bins, labels=age_labels)
 
-        # get contacts
+        # create contacts_df
         arcpy.SetProgressor('default', 'Getting Contact Data')
         contact_data = get_contacts(selected_outbreak_id, in_gd_api_url, token)
         new_contacts = convert_contacts_json_to_csv(contact_data, ref_data)
@@ -1071,20 +1072,19 @@ class CreateSITREPTables(object):
         contacts_df.loc[(contacts_df['dateFollowUpStart']<= last_two_weeks) & (contacts_df['dateFollowUpEnd'] >= last_two_weeks), ['followUpStatusPast14Days']] = True
         contacts_df.loc[contacts_df['followUpStatusPast14Days'] != True, ['followUpStatusPast14Days']] = False
         
-        # get followups
+        # create followups_df
         arcpy.SetProgressor('default', 'Getting Followup Data')
         followup_data = get_followups(selected_outbreak_id, in_gd_api_url, token)
         new_followups = convert_followups_json_to_csv(followup_data, ref_data)
         followups_df = pd.DataFrame(new_followups)
         if len(followups_df)>0:
             fieldValueSplitter(followups_df, 'statusId', 'STATUS_TYPE_')
-            #followups_df['statusId'] = followups_df['statusId'].str.split('STATUS_TYPE_').str[-1]
             updateDates(date_flds, dt_flds, followups_df)
-            arcpy.AddMessage(followups_df)
+            followups = True
         else: 
             followups = False
 
-        # get relationships
+        # create relates_df
         arcpy.SetProgressor('default', 'Getting Relationship Data')
         relate_data = get_relationships(selected_outbreak_id, in_gd_api_url, token)
         new_relates = convert_relates_json_to_csv(relate_data, ref_data)
@@ -1099,6 +1099,7 @@ class CreateSITREPTables(object):
         fieldValueSplitter(relates_df, 'certaintyLevelId', 'CERTAINTY_LEVEL_')
         relates_df = getVisualIds(relates_df, contacts_df, 'target')
         relates_df = getVisualIds(relates_df, cases_df, 'source')
+
         # output relationships data (no joins) 
         relate_model = list(get_FieldNameUpdater('relationship_data')['attributes'].keys())
         relate_model = [c for c in relate_model if c in relates_df.columns] 
@@ -1108,10 +1109,11 @@ class CreateSITREPTables(object):
         relates_out.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
         relates_df.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
 
-        #prep locations file for join using the lowest level admin that is found in the cases data
 
-        #cases_df['adminLevel'] = cases_df['adminLevel'].astype(int)
-        
+        #prep locations file for join using the lowest level admin that is found in the cases data
+        all_loc_ids =  locations_df[['id', 'adminLevel']].loc[locations_df['adminLevel']!=-1].rename(columns={'id':'locationId'}).set_index('locationId')
+        all_cases_loc_ids = cases_df.groupby('locationId', as_index=False).count()[['locationId', 'id']].rename(columns={'id':'cnt'}).set_index('locationId')
+        admin_level = all_cases_loc_ids.join(all_loc_ids, how='left').groupby('adminLevel')['cnt'].sum().idxmax()
         location_flds = [f'admin_{i}_name' for i in range(int(admin_level)+1)]
         location_flds.extend([f'admin_{admin_level}_LocationId', f'admin_{admin_level}_Lat', f'admin_{admin_level}_Lng'])
         locations_join = locations_out[location_flds].copy()
@@ -1124,7 +1126,7 @@ class CreateSITREPTables(object):
         case_model = [c for c in case_model if c in list(cases_df.columns) ] #take the fieldnames from case_model that are also in the dataframe
         cases_df = cases_df.filter(case_model)
         cases_df = cases_df[case_model]
-        cases_df.to_csv(full_job_path_raw.joinpath('Cases.csv'), index=False ) 
+        cases_df.to_csv(full_job_path_raw.joinpath('Cases.csv'), index=False) 
 
         # Join Locations to Followups and output followups
         if followups:
