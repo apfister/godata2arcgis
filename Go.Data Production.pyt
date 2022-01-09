@@ -781,6 +781,13 @@ class CreateSITREPTables(object):
             datatype="GPString",
             parameterType="Required",
             direction="Input")
+        
+        param_output_summary = arcpy.Parameter(
+            displayName = "Output summary files",
+            name= "in_gd_outputsumm",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input")
 
         # Output Folder for CSV Summary files
         param_output_summary_folder = arcpy.Parameter(
@@ -850,11 +857,12 @@ class CreateSITREPTables(object):
 
         param_geojoinfield.parameterDependencies = [param_geolayer.name]
 
+        param_joingeo.enabled=False
         param_geolayer.enabled = False
         param_geojoinfield.enabled = False
         param_keepallgeo.enabled = False
 
-        return [param_url, param_username, param_password, param_outbreak, param_output_summary_folder, param_output_raw_folder, param_outworkspace, param_joingeo, param_geolayer, param_geojoinfield, param_keepallgeo, param_outputfcpaths]
+        return [param_url, param_username, param_password, param_outbreak, param_output_summary, param_output_summary_folder, param_output_raw_folder, param_outworkspace, param_joingeo, param_geolayer, param_geojoinfield, param_keepallgeo, param_outputfcpaths]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -889,13 +897,16 @@ class CreateSITREPTables(object):
          
 
         if parameters[3].value:
-            # parameters[10].value = outbreaks_cache[parameters[3].value]
+            # parameters[11].value = outbreaks_cache[parameters[3].value]
             selected_outbreak_id = outbreaks_cache[parameters[3].value]
 
+        parameters[5].enabled = parameters[4].value
+        parameters[7].enabled = parameters[4].value
+        parameters[8].enabled = parameters[4].value
 
-        parameters[8].enabled = parameters[7].value
-        parameters[9].enabled = parameters[7].value
-        parameters[10].enabled = parameters[7].value
+        parameters[9].enabled = parameters[8].value
+        parameters[10].enabled = parameters[8].value
+        parameters[11].enabled = parameters[8].value
        
         return
 
@@ -916,13 +927,14 @@ class CreateSITREPTables(object):
         in_gd_api_url = parameters[0].valueAsText
         in_gd_username = parameters[1].valueAsText
         in_gd_password = parameters[2].valueAsText
-        in_gd_outcsvsummfolder = parameters[4].valueAsText
-        in_gd_outcsvrawfolder = parameters[5].valueAsText
-        in_gd_outworkspace = parameters[6].valueAsText
-        in_gd_shouldjoin = parameters[7].value    
-        in_gd_geolayer = parameters[8].value
-        in_gd_geojoinfield = parameters[9].valueAsText
-        in_gd_shouldkeepallgeo = parameters[10].value
+        in_gd_outputsumm = parameters[4].value
+        in_gd_outcsvsummfolder = parameters[5].valueAsText
+        in_gd_outcsvrawfolder = parameters[6].valueAsText
+        in_gd_outworkspace = parameters[7].valueAsText
+        in_gd_shouldjoin = parameters[8].value    
+        in_gd_geolayer = parameters[9].value
+        in_gd_geojoinfield = parameters[10].valueAsText
+        in_gd_shouldkeepallgeo = parameters[11].value
 
         wd_summ = create_working_directory(in_gd_outcsvsummfolder)
         full_job_path_summ = wd_summ[0]
@@ -1107,7 +1119,7 @@ class CreateSITREPTables(object):
         relates_out = relates_out[relate_model]        # reordering the columns
         updateDates(date_flds, dt_flds, relates_out)
         relates_out.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
-        relates_df.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
+        #relates_df.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
 
 
         #prep locations file for join using the lowest level admin that is found in the cases data
