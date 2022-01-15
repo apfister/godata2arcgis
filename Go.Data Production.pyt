@@ -12,22 +12,20 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import pandas as pd
 
-def create_working_directory(in_loc, summary=True):
-    now_ts = datetime.now().strftime('%Y%m%d%H%M%S')
-    
+def create_working_directory(in_loc, summary):
+    now_ts = datetime.now().strftime('%Y-%m-%d_%H%M%S')   
     # current_wd = Path(os.path.dirname(os.path.realpath(__file__)))
     output_path = Path(in_loc)
-    
+    raw_data_folder = f'GoData Raw Data - {now_ts}'
+    raw_data_path = output_path.joinpath(raw_data_folder)
+    raw_data_path.mkdir()
     if summary:
-        job_ws_foldername = f'GoData Summary Data - {now_ts}'
+        summ_data_folder = f'GoData Summary Data - {now_ts}'
+        summ_data_path = output_path.joinpath(summ_data_folder)
+        summ_data_path.mkdir() 
     else:
-        job_ws_foldername = f'GoData Raw Data - {now_ts}'
-
-    full_job_path = output_path.joinpath(job_ws_foldername)
-    full_job_path.mkdir()
-
-    return [full_job_path, now_ts]
-
+        summ_data_path = None    
+    return [raw_data_path, summ_data_path, now_ts]
 def get_token(url, username, password):
     data = {
         "username": username,
@@ -561,23 +559,23 @@ def get_geom(geo_field, geo_value, join_field_type):
 
         return geom
 
-def create_fc_table(path_to_csv_file, in_gd_outworkspace, output_filename):
+def create_fc_table(path_to_csv_file, in_gd_outgdbworkspace, output_filename):
     try:
-        arcpy.TableToTable_conversion(path_to_csv_file, in_gd_outworkspace, output_filename)
+        arcpy.TableToTable_conversion(path_to_csv_file, in_gd_outgdbworkspace, output_filename)
     except Exception:
         e = sys.exc_info()[1]
         error = e.args[0]
         print (error)
         return error
 
-def create_featureclass(path_to_csv_file, in_gd_outworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, unique_location_ids):
+def create_featureclass(path_to_csv_file, in_gd_outgdbworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, unique_location_ids):
     global geom_cache
     geom_cache = {}
 
     global geo_fl
     geo_fl = 'geo_fl'
 
-    final_output_fc_path = os.path.join(in_gd_outworkspace, output_filename)
+    final_output_fc_path = os.path.join(in_gd_outgdbworkspace, output_filename)
 
     arcpy.SetProgressor('default', 'Converting CSV file to Table in memory ...')
     # write csv to temp table in output workspace - will be deleted later
@@ -607,7 +605,7 @@ def create_featureclass(path_to_csv_file, in_gd_outworkspace, output_filename, i
 
     arcpy.SetProgressor('default', f'Creating {output_filename} feature class ...')
     try:
-        arcpy.CreateFeatureclass_management(in_gd_outworkspace, output_filename, geo_layer_feature_type, '#', '#', '#', geo_layer_sr)
+        arcpy.CreateFeatureclass_management(in_gd_outgdbworkspace, output_filename, geo_layer_feature_type, '#', '#', '#', geo_layer_sr)
     except Exception:
         e = sys.exc_info()[1]
         error = e.args[0]
@@ -637,7 +635,7 @@ def create_featureclass(path_to_csv_file, in_gd_outworkspace, output_filename, i
     # add the fields
     arcpy.SetProgressor('default', 'Adding fields to output feature class ...')
     try:
-        arcpy.AddFields_management(os.path.join(in_gd_outworkspace, output_filename), gd_tbl_fields)
+        arcpy.AddFields_management(os.path.join(in_gd_outgdbworkspace, output_filename), gd_tbl_fields)
     except Exception:
         e = sys.exc_info()[1]
         error = e.args[0]
@@ -708,10 +706,10 @@ def create_featureclass(path_to_csv_file, in_gd_outworkspace, output_filename, i
     return None, final_output_fc_path    
 
 
-def join_to_geo(path_to_csv_file, in_gd_outworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, tbl_name, unique_location_ids):
+def join_to_geo(path_to_csv_file, in_gd_outgdbworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, tbl_name, unique_location_ids):
     # create cases FC table
     arcpy.SetProgressor('default', f'Joining {tbl_name} table to geography ...')
-    err, fc_path = create_featureclass(path_to_csv_file, in_gd_outworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, unique_location_ids)
+    err, fc_path = create_featureclass(path_to_csv_file, in_gd_outgdbworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, unique_location_ids)
     
     return err, fc_path
 
@@ -782,6 +780,15 @@ class CreateSITREPTables(object):
             parameterType="Required",
             direction="Input")
         
+        # Output Folder for CSV files (both Raw and Summary)
+        param_output_folder = arcpy.Parameter(
+            displayName="Output folder for CSVs",
+            name="in_gd_outputfolder",
+            datatype="DEFolder",
+            parameterType="Required",
+            direction="Input")
+        
+        # Output CSV Summary files
         param_output_summary = arcpy.Parameter(
             displayName = "Output summary files",
             name= "in_gd_outputsumm",
@@ -789,26 +796,18 @@ class CreateSITREPTables(object):
             parameterType="Optional",
             direction="Input")
 
-        # Output Folder for CSV Summary files
-        param_output_summary_folder = arcpy.Parameter(
-            displayName="Output folder for Summary Data CSVs",
-            name="in_gd_outcsvsummfolder",
-            datatype="DEFolder",
-            parameterType="Required",
-            direction="Input")
-
-        # Output Folder for CSV Raw files
-        param_output_raw_folder = arcpy.Parameter(
-            displayName="Output folder for Raw Data CSVs",
-            name="in_gd_outcsvrawfolder",
-            datatype="DEFolder",
-            parameterType="Required",
-            direction="Input")
+        # # Output Folder for CSV Summary files
+        # param_output_summary_folder = arcpy.Parameter(
+        #     displayName="Output folder for Summary Data CSVs",
+        #     name="in_gd_outcsvsummfolder",
+        #     datatype="DEFolder",
+        #     parameterType="Optional",
+        #     direction="Input")
 
         # Output Workspace
         param_outworkspace = arcpy.Parameter(
-            displayName="Output Features and Tables to FGDB",
-            name="in_outputfcworkspace",
+            displayName="File Geodatabase Output Workspace for Features and Tables",
+            name="in_gd_outgdbworkspace",
             datatype="DEWorkspace",
             parameterType="Optional",
             direction="Input")
@@ -857,12 +856,13 @@ class CreateSITREPTables(object):
 
         param_geojoinfield.parameterDependencies = [param_geolayer.name]
 
+        #param_output_summary.enabled=False
         param_joingeo.enabled=False
         param_geolayer.enabled = False
         param_geojoinfield.enabled = False
         param_keepallgeo.enabled = False
 
-        return [param_url, param_username, param_password, param_outbreak, param_output_summary, param_output_summary_folder, param_output_raw_folder, param_outworkspace, param_joingeo, param_geolayer, param_geojoinfield, param_keepallgeo, param_outputfcpaths]
+        return [param_url, param_username, param_password, param_outbreak, param_output_folder, param_output_summary,  param_outworkspace, param_joingeo, param_geolayer, param_geojoinfield, param_keepallgeo, param_outputfcpaths]
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -900,13 +900,13 @@ class CreateSITREPTables(object):
             # parameters[11].value = outbreaks_cache[parameters[3].value]
             selected_outbreak_id = outbreaks_cache[parameters[3].value]
 
-        parameters[5].enabled = parameters[4].value
-        parameters[7].enabled = parameters[4].value
-        parameters[8].enabled = parameters[4].value
+        #parameters[6].enabled = parameters[5].value
+        parameters[6].enabled = parameters[5].value
+        parameters[7].enabled = parameters[5].value
 
-        parameters[9].enabled = parameters[8].value
-        parameters[10].enabled = parameters[8].value
-        parameters[11].enabled = parameters[8].value
+        parameters[8].enabled = parameters[7].value
+        parameters[9].enabled = parameters[7].value
+        parameters[10].enabled = parameters[7].value
        
         return
 
@@ -927,26 +927,25 @@ class CreateSITREPTables(object):
         in_gd_api_url = parameters[0].valueAsText
         in_gd_username = parameters[1].valueAsText
         in_gd_password = parameters[2].valueAsText
-        in_gd_outputsumm = parameters[4].value
-        in_gd_outcsvsummfolder = parameters[5].valueAsText
-        in_gd_outcsvrawfolder = parameters[6].valueAsText
-        in_gd_outworkspace = parameters[7].valueAsText
-        in_gd_shouldjoin = parameters[8].value    
-        in_gd_geolayer = parameters[9].value
-        in_gd_geojoinfield = parameters[10].valueAsText
-        in_gd_shouldkeepallgeo = parameters[11].value
+        in_gd_outbreak = selected_outbreak_id
+        in_gd_outputfolder = parameters[4].valueAsText
+        in_gd_outputsumm = parameters[5].value
+        in_gd_outgdbworkspace = parameters[6].valueAsText
+        in_gd_shouldjoin = parameters[7].value    
+        in_gd_geolayer = parameters[8].value
+        in_gd_geojoinfield = parameters[9].valueAsText
+        in_gd_shouldkeepallgeo = parameters[10].value
 
-        wd_summ = create_working_directory(in_gd_outcsvsummfolder)
-        full_job_path_summ = wd_summ[0]
-        now_ts = wd_summ[1]
+        wd = create_working_directory(in_gd_outputfolder, in_gd_outputsumm)
+        full_job_path_raw = wd[0]
+        full_job_path_summ = wd[1]
+        now_ts = wd[2]
 
-        wd_raw = create_working_directory(in_gd_outcsvrawfolder, summary=False)
-        full_job_path_raw = wd_raw[0]
+       # wd_raw = create_working_directory(in_gd_outcsvrawfolder, in_gd_outputsumm)
+        #full_job_path_raw = wd_raw[0]
         output_paths = []  
 
-        in_gd_outbreak = selected_outbreak_id
-
-                # setup needed dates
+        # setup needed dates
         dte_format = '%Y-%m-%dT%H:%M:%S.%fZ'
 
         right_now = datetime.now()
@@ -1006,8 +1005,6 @@ class CreateSITREPTables(object):
         locations_df['adminLevel'] = locations_df['geographicalLevelId'].str.split('_').str[-1]
         locations_df.loc[locations_df['adminLevel'].isna(), 'adminLevel'] = -1               
         locations_df['adminLevel'] = locations_df['adminLevel'].astype(int)
-        
-        
         
         #transpose locations data
         i = 0
@@ -1161,277 +1158,278 @@ class CreateSITREPTables(object):
 
 
         start_date = min(list([datetime.strptime(c['dateOfReporting'], dte_format).date() for c in new_cases]))
-
-        # Cases by Reporting Area
-        features = []
-        for case in new_cases:
-            location_id = case['locationId']
-    
-            reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
-    
-            feature = get_feature(location_id, features, 'cases_by_reporting_area')
-    
-            # yesterday
-            if reporting_date == yesterday:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    increment_count(feature, 'DAILY_NEW_CONFIRMED')
-   
-            # cumulative
-            if reporting_date >= start_date:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    increment_count(feature, 'CUM_CONFIRMED')                    
-
-            #last week
-            if reporting_date >= last_week:
-                # conf = None
-                # prob = None
         
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    increment_count(feature, 'CONFIRMED_LAST_SEVEN')
-                    # conf = cnt
-                # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                #     cnt = increment_count(feature, 'PROBABLE_LAST_SEVEN')
-                #     prob = cnt
-
-                # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_SUSPECT':
-                #     increment_count(feature, 'SUSPECT_LAST_SEVEN')
+        if in_gd_outputsumm:
+            # Cases by Reporting Area
+            features = []
+            for case in new_cases:
+                location_id = case['locationId']
         
-                # if prob is not None or conf is not None:
-                #     if prob is None:
-                #         prob = 0
-                #     if conf is None:
-                #         conf = 0
+                reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
+        
+                feature = get_feature(location_id, features, 'cases_by_reporting_area')
+        
+                # yesterday
+                if reporting_date == yesterday:
+                    if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                        increment_count(feature, 'DAILY_NEW_CONFIRMED')
+    
+                # cumulative
+                if reporting_date >= start_date:
+                    if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                        increment_count(feature, 'CUM_CONFIRMED')                    
+
+                #last week
+                if reporting_date >= last_week:
+                    # conf = None
+                    # prob = None
+            
+                    if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                        increment_count(feature, 'CONFIRMED_LAST_SEVEN')
+                        # conf = cnt
+                    # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
+                    #     cnt = increment_count(feature, 'PROBABLE_LAST_SEVEN')
+                    #     prob = cnt
+
+                    # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_SUSPECT':
+                    #     increment_count(feature, 'SUSPECT_LAST_SEVEN')
+            
+                    # if prob is not None or conf is not None:
+                    #     if prob is None:
+                    #         prob = 0
+                    #     if conf is None:
+                    #         conf = 0
+                    
+                        #current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN']
+                        # if current_count is None:
+                        #     current_count = 0
+                        #     feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = 0
                 
-                    #current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN']
-                    # if current_count is None:
-                    #     current_count = 0
-                    #     feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = 0
-            
-                    # feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = current_count + (prob + conf)
+                        # feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = current_count + (prob + conf)
 
-            if reporting_date >= last_two_weeks:
-                # conf = None
-                # prob = None
-        
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    increment_count(feature, 'CONFIRMED_LAST_FOURTEEN')
-                    #conf = cnt
-                # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                #     cnt = increment_count(feature, 'PROBABLE_LAST_FOURTEEN')
-                #     prob = cnt
+                if reporting_date >= last_two_weeks:
+                    # conf = None
+                    # prob = None
             
-                # if prob is not None or conf is not None:
-                #     if prob is None:
-                #         prob = 0
-                #     if conf is None:
-                #         conf = 0
+                    if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                        increment_count(feature, 'CONFIRMED_LAST_FOURTEEN')
+                        #conf = cnt
+                    # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
+                    #     cnt = increment_count(feature, 'PROBABLE_LAST_FOURTEEN')
+                    #     prob = cnt
                 
-                #     current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN']
-                #     if current_count is None:
-                #         current_count = 0
-                #         feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = 0
-            
-                #     feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = current_count + (prob + conf)
+                    # if prob is not None or conf is not None:
+                    #     if prob is None:
+                    #         prob = 0
+                    #     if conf is None:
+                    #         conf = 0
+                    
+                    #     current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN']
+                    #     if current_count is None:
+                    #         current_count = 0
+                    #         feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = 0
+                
+                    #     feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = current_count + (prob + conf)
 
-        # convert features back to csv_rows
-        headers, cases_by_rep_csv_rows = convert_features_to_csv(features)
+            # convert features back to csv_rows
+            headers, cases_by_rep_csv_rows = convert_features_to_csv(features)
 
-        # create cases CSV
-        arcpy.SetProgressor('default', 'Creating Cases CSV file ...')
-        path_to_csv_file = create_csv_file(cases_by_rep_csv_rows, 'Cases_by_Reporting_Area.csv', headers, full_job_path_summ)
+            # create cases CSV
+            arcpy.SetProgressor('default', 'Creating Cases CSV file ...')
+            path_to_csv_file = create_csv_file(cases_by_rep_csv_rows, 'Cases_by_Reporting_Area.csv', headers, full_job_path_summ)
 
-        # create cases FC table
-        arcpy.SetProgressor('default', 'Creating Cases feature class table ...')
-        output_filename = 'Cases_By_Reporting_Area'
-        err = create_fc_table(str(path_to_csv_file), in_gd_outworkspace, output_filename)
-        if err is not None:
-            arcpy.AddError(error)
-
-        unique_location_ids = []
-        for c in new_cases:
-            for k in c.keys():
-                if k == 'locationId':
-                    if not c[k] in unique_location_ids:
-                        unique_location_ids.append(c[k])
-
-        if in_gd_shouldjoin:
             # create cases FC table
-            err, fc_path = join_to_geo(path_to_csv_file, in_gd_outworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, 'Cases by Reporting Area', unique_location_ids)
+            arcpy.SetProgressor('default', 'Creating Cases feature class table ...')
+            output_filename = 'Cases_By_Reporting_Area'
+            err = create_fc_table(str(path_to_csv_file), in_gd_outgdbworkspace, output_filename)
             if err is not None:
-                arcpy.AddError(err)
+                arcpy.AddError(error)
 
-            output_paths.append(fc_path)           
-             
+            unique_location_ids = []
+            for c in new_cases:
+                for k in c.keys():
+                    if k == 'locationId':
+                        if not c[k] in unique_location_ids:
+                            unique_location_ids.append(c[k])
 
-        # Deaths by Reporting Area
-        filtered_cases = [c for c in new_cases if 'outcomeId_code' in c and c['outcomeId_code'] == 'LNG_REFERENCE_DATA_CATEGORY_OUTCOME_DECEASED']
+            if in_gd_shouldjoin:
+                # create cases FC table
+                err, fc_path = join_to_geo(path_to_csv_file, in_gd_outgdbworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, 'Cases by Reporting Area', unique_location_ids)
+                if err is not None:
+                    arcpy.AddError(err)
 
-        unique_location_ids = []
-        for c in filtered_cases:
-            for k in c.keys():
-                if k == 'locationId':
-                    if not c[k] in unique_location_ids:
-                        unique_location_ids.append(c[k])
-
-        deaths_features = []
-        for case in filtered_cases:
-            location_id = case['locationId']
-    
-            reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
-            
-            feature = get_feature(location_id, deaths_features, 'deaths_by_reporting_area') 
-    
-            if reporting_date >= start_date:
-                increment_count(feature, 'CUM_DEATHS')                    
-    
-            if reporting_date >= last_week:
-                increment_count(feature, 'DEATHS_LAST_SEVEN')
-
-            if reporting_date >= last_two_weeks:
-                increment_count(feature, 'DEATHS_LAST_FOURTEEN')
-
-
-        if len(deaths_features) > 0:
-            # convert back to csv
-            headers, deaths_by_rep_csv_rows = convert_features_to_csv(deaths_features)
-            # create deaths CSV
-            arcpy.SetProgressor('default', 'Creating Deaths by Reporting Area CSV file ...')
-            path_to_csv_file = create_csv_file(deaths_by_rep_csv_rows, 'Deaths_by_Reporting_Area.csv', headers, full_job_path_summ)
-        else:
-            arcpy.AddMessage('No death data available.  Skipping Deaths_by_Reporting_Area.csv')
-
-        # create deaths FC table
-        arcpy.SetProgressor('default', 'Creating Deaths by Reporting Area feature class table ...')
-        output_filename = 'Deaths_By_Reporting_Area'
-        err = create_fc_table(str(path_to_csv_file), in_gd_outworkspace, output_filename)
-        if err is not None:
-            arcpy.AddError(error)
-
-        # join to geography
-        if in_gd_shouldjoin:
-            err, fc_path = join_to_geo(path_to_csv_file, in_gd_outworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, 'Deaths by Reporting Area', unique_location_ids)
-            if err is not None:
-                arcpy.AddError(err)
-
-            output_paths.append(fc_path)
-
-
-        # Percent Change in New Cases by Reporting Area
-        unique_location_ids = []
-        for c in new_cases:
-            for k in c.keys():
-                if k == 'locationId':
-                    if not c[k] in unique_location_ids:
-                        unique_location_ids.append(c[k])
-
-        pctchg_features = []
-        # sum_conf_prob_7 = 0
-        # sum_conf_prob_14 = 0
-        # sum_conf_prob_8_14 = 0
-        # sum_conf_prob_15_28 = 0
-
-        for case in new_cases:
-            location_id = case['locationId']
-    
-            reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
-           #reporting_date_fm = reporting_date.strftime('%Y-%m-%d')
-        
-            feature = get_feature(location_id, pctchg_features, 'pctchg_by_reporting_area')                   
-    
-            if reporting_date >= last_week:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    increment_count(feature, 'AVG_CONFIRMED_LAST_SEVEN')
+                output_paths.append(fc_path)           
                 
-            if reporting_date >= last_two_weeks:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    increment_count(feature, 'AVG_CONFIRMED_LAST_FOURTEEN')
+
+            # Deaths by Reporting Area
+            filtered_cases = [c for c in new_cases if 'outcomeId_code' in c and c['outcomeId_code'] == 'LNG_REFERENCE_DATA_CATEGORY_OUTCOME_DECEASED']
+
+            unique_location_ids = []
+            for c in filtered_cases:
+                for k in c.keys():
+                    if k == 'locationId':
+                        if not c[k] in unique_location_ids:
+                            unique_location_ids.append(c[k])
+
+            deaths_features = []
+            for case in filtered_cases:
+                location_id = case['locationId']
+        
+                reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
+                
+                feature = get_feature(location_id, deaths_features, 'deaths_by_reporting_area') 
+        
+                if reporting_date >= start_date:
+                    increment_count(feature, 'CUM_DEATHS')                    
+        
+                if reporting_date >= last_week:
+                    increment_count(feature, 'DEATHS_LAST_SEVEN')
+
+                if reporting_date >= last_two_weeks:
+                    increment_count(feature, 'DEATHS_LAST_FOURTEEN')
+
+
+            if len(deaths_features) > 0:
+                # convert back to csv
+                headers, deaths_by_rep_csv_rows = convert_features_to_csv(deaths_features)
+                # create deaths CSV
+                arcpy.SetProgressor('default', 'Creating Deaths by Reporting Area CSV file ...')
+                path_to_csv_file = create_csv_file(deaths_by_rep_csv_rows, 'Deaths_by_Reporting_Area.csv', headers, full_job_path_summ)
+            else:
+                arcpy.AddMessage('No death data available.  Skipping Deaths_by_Reporting_Area.csv')
+
+            # create deaths FC table
+            arcpy.SetProgressor('default', 'Creating Deaths by Reporting Area feature class table ...')
+            output_filename = 'Deaths_By_Reporting_Area'
+            err = create_fc_table(str(path_to_csv_file), in_gd_outgdbworkspace, output_filename)
+            if err is not None:
+                arcpy.AddError(error)
+
+            # join to geography
+            if in_gd_shouldjoin:
+                err, fc_path = join_to_geo(path_to_csv_file, in_gd_outgdbworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, 'Deaths by Reporting Area', unique_location_ids)
+                if err is not None:
+                    arcpy.AddError(err)
+
+                output_paths.append(fc_path)
+
+
+            # Percent Change in New Cases by Reporting Area
+            unique_location_ids = []
+            for c in new_cases:
+                for k in c.keys():
+                    if k == 'locationId':
+                        if not c[k] in unique_location_ids:
+                            unique_location_ids.append(c[k])
+
+            pctchg_features = []
+            # sum_conf_prob_7 = 0
+            # sum_conf_prob_14 = 0
+            # sum_conf_prob_8_14 = 0
+            # sum_conf_prob_15_28 = 0
+
+            for case in new_cases:
+                location_id = case['locationId']
+        
+                reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
+            #reporting_date_fm = reporting_date.strftime('%Y-%m-%d')
             
-            if eight_days_ago >= reporting_date >= last_two_weeks:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    increment_count(feature, 'AVG_CONFIRMED_EIGHT_TO_FOURTEEN')
-                        
-            if fifteen_days_ago >= reporting_date >= twenty_eight_days_ago:
-                if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
-                    increment_count(feature, 'AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT')
-
-        for feature in pctchg_features:
-            val = feature['attributes']['AVG_CONFIRMED_LAST_SEVEN']
-            if val is not None:
-                feature['attributes']['AVG_CONFIRMED_LAST_SEVEN'] = round(val / 7, 2)
+                feature = get_feature(location_id, pctchg_features, 'pctchg_by_reporting_area')                   
         
-            val = feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN']
-            if val is not None:
-                feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN'] = round(val / 14, 2)
-    
-            val = feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN']
-            if val is not None:
-                feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN'] = round(val / 7, 2)
-        
-            val = feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT']
-            if val is not None:
-                feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT'] = round(val / 14, 2)
-        
-            val2 = feature['attributes']['AVG_CONFIRMED_LAST_SEVEN']
-            val1 = feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN']
-            if val2 is not None and val1 is not None and val2 > 0 and val1 > 0:
-                pct_chg = ((val2 - val1) / abs(val1)) * 100
-                feature['attributes']['PERCENT_CHANGE_RECENT_SEVEN'] = pct_chg
-        
-            val2 = feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN']
-            val1 = feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT']
-            if val2 is not None and val1 is not None and val2 > 0 and val1 > 0:
-                pct_chg = ((val2 - val1) / abs(val1)) * 100
-                feature['attributes']['PERCENT_CHANGE_RECENT_FOURTEEN'] = pct_chg
-    
-        # convert back to csv
-        headers, pct_by_rep_csv_rows = convert_features_to_csv(pctchg_features)
+                if reporting_date >= last_week:
+                    if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                        increment_count(feature, 'AVG_CONFIRMED_LAST_SEVEN')
+                    
+                if reporting_date >= last_two_weeks:
+                    if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                        increment_count(feature, 'AVG_CONFIRMED_LAST_FOURTEEN')
+                
+                if eight_days_ago >= reporting_date >= last_two_weeks:
+                    if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                        increment_count(feature, 'AVG_CONFIRMED_EIGHT_TO_FOURTEEN')
+                            
+                if fifteen_days_ago >= reporting_date >= twenty_eight_days_ago:
+                    if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
+                        increment_count(feature, 'AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT')
 
-        # create pct change CSV
-        arcpy.SetProgressor('default', 'Creating Percent Change in New Cases by Reporting Area CSV file ...')
-        path_to_csv_file = create_csv_file(pct_by_rep_csv_rows, 'Percent_Change_in_New_Cases_by_Reporting_Area.csv', headers, full_job_path_summ)
+            for feature in pctchg_features:
+                val = feature['attributes']['AVG_CONFIRMED_LAST_SEVEN']
+                if val is not None:
+                    feature['attributes']['AVG_CONFIRMED_LAST_SEVEN'] = round(val / 7, 2)
+            
+                val = feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN']
+                if val is not None:
+                    feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN'] = round(val / 14, 2)
+        
+                val = feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN']
+                if val is not None:
+                    feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN'] = round(val / 7, 2)
+            
+                val = feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT']
+                if val is not None:
+                    feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT'] = round(val / 14, 2)
+            
+                val2 = feature['attributes']['AVG_CONFIRMED_LAST_SEVEN']
+                val1 = feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN']
+                if val2 is not None and val1 is not None and val2 > 0 and val1 > 0:
+                    pct_chg = ((val2 - val1) / abs(val1)) * 100
+                    feature['attributes']['PERCENT_CHANGE_RECENT_SEVEN'] = pct_chg
+            
+                val2 = feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN']
+                val1 = feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT']
+                if val2 is not None and val1 is not None and val2 > 0 and val1 > 0:
+                    pct_chg = ((val2 - val1) / abs(val1)) * 100
+                    feature['attributes']['PERCENT_CHANGE_RECENT_FOURTEEN'] = pct_chg
+        
+            # convert back to csv
+            headers, pct_by_rep_csv_rows = convert_features_to_csv(pctchg_features)
 
-        # create pct change FC table
-        arcpy.SetProgressor('default', 'Creating Percent Change in New Cases by Reporting Area feature class table ...')
-        output_filename = 'Percent_Change_in_New_Cases_by_Reporting_Area'
-        err = create_fc_table(str(path_to_csv_file), in_gd_outworkspace, output_filename)
-        if err is not None:
-            arcpy.AddError(error)
+            # create pct change CSV
+            arcpy.SetProgressor('default', 'Creating Percent Change in New Cases by Reporting Area CSV file ...')
+            path_to_csv_file = create_csv_file(pct_by_rep_csv_rows, 'Percent_Change_in_New_Cases_by_Reporting_Area.csv', headers, full_job_path_summ)
 
-        # join to geography
-        if in_gd_shouldjoin:
-            err, fc_path = join_to_geo(path_to_csv_file, in_gd_outworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, 'Percent Change in New Cases by Reporting Area', unique_location_ids)
+            # create pct change FC table
+            arcpy.SetProgressor('default', 'Creating Percent Change in New Cases by Reporting Area feature class table ...')
+            output_filename = 'Percent_Change_in_New_Cases_by_Reporting_Area'
+            err = create_fc_table(str(path_to_csv_file), in_gd_outgdbworkspace, output_filename)
             if err is not None:
-                arcpy.AddError(err)
+                arcpy.AddError(error)
 
-            output_paths.append(fc_path)
+            # join to geography
+            if in_gd_shouldjoin:
+                err, fc_path = join_to_geo(path_to_csv_file, in_gd_outgdbworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, 'Percent Change in New Cases by Reporting Area', unique_location_ids)
+                if err is not None:
+                    arcpy.AddError(err)
 
-        # Active Contacts Summary Table
-        arcpy.SetProgressor('default', 'Creating Contacts by Reporting Area CSV file ...')
-        output_filename = 'Contacts_by_Reporting_Area'
-        path_to_csv_file = full_job_path_summ.joinpath('Contacts_by_Reporting_Area.csv').resolve()
-        contacts_summary = contacts_df[['locationId' ,f'admin_{admin_level}_name','followUpStatus', 'followUpStatusPast7Days', 'followUpStatusPast14Days']].copy()
-        contacts_summary.replace({True:1,False:0}, inplace=True)
-        contacts_summary = contacts_summary.groupby(['locationId', f'admin_{admin_level}_name'])[['followUpStatus', 'followUpStatusPast7Days', 'followUpStatusPast14Days']].sum()
-        contacts_summary = contacts_summary.loc[contacts_summary.sum(axis=1)>0]
-        contacts_summary.reset_index(inplace=True)
-        unique_location_ids = list(set(contacts_summary['locationId'].unique()))
-        contacts_summary.to_csv(path_to_csv_file, index=False)
-        
-        arcpy.SetProgressor('default', 'Creating Contacts_by_Reporting_Area feature class table ...')
-        err = create_fc_table(str(path_to_csv_file), in_gd_outworkspace, output_filename)
-        if err is not None:
-            arcpy.AddError(error)
+                output_paths.append(fc_path)
 
-        # join to geography
-        if in_gd_shouldjoin:
-            err, fc_path = join_to_geo(path_to_csv_file, in_gd_outworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, 'Contacts_by_Reporting_Area', unique_location_ids)
+            # Active Contacts Summary Table
+            arcpy.SetProgressor('default', 'Creating Contacts by Reporting Area CSV file ...')
+            output_filename = 'Contacts_by_Reporting_Area'
+            path_to_csv_file = full_job_path_summ.joinpath('Contacts_by_Reporting_Area.csv').resolve()
+            contacts_summary = contacts_df[['locationId' ,f'admin_{admin_level}_name','followUpStatus', 'followUpStatusPast7Days', 'followUpStatusPast14Days']].copy()
+            contacts_summary.replace({True:1,False:0}, inplace=True)
+            contacts_summary = contacts_summary.groupby(['locationId', f'admin_{admin_level}_name'])[['followUpStatus', 'followUpStatusPast7Days', 'followUpStatusPast14Days']].sum()
+            contacts_summary = contacts_summary.loc[contacts_summary.sum(axis=1)>0]
+            contacts_summary.reset_index(inplace=True)
+            unique_location_ids = list(set(contacts_summary['locationId'].unique()))
+            contacts_summary.to_csv(path_to_csv_file, index=False)
+            
+            arcpy.SetProgressor('default', 'Creating Contacts_by_Reporting_Area feature class table ...')
+            err = create_fc_table(str(path_to_csv_file), in_gd_outgdbworkspace, output_filename)
             if err is not None:
-                arcpy.AddError(err)
+                arcpy.AddError(error)
 
-            output_paths.append(fc_path)
+            # join to geography
+            if in_gd_shouldjoin:
+                err, fc_path = join_to_geo(path_to_csv_file, in_gd_outgdbworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, 'Contacts_by_Reporting_Area', unique_location_ids)
+                if err is not None:
+                    arcpy.AddError(err)
 
-        if len(output_paths) > 0:
-            # set the output parameter
-            arcpy.SetParameter(11, ';'.join(output_paths))
+                output_paths.append(fc_path)
+
+            if len(output_paths) > 0:
+                # set the output parameter
+                arcpy.SetParameter(11, ';'.join(output_paths))
         
         return 
