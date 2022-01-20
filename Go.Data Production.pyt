@@ -160,7 +160,6 @@ def convert_cases_json_to_csv(cases, ref_data):
         for key in keys:
             if key == 'age':
                 feature['age'] = case[key]['years']
-                #feature['age_months'] = case[key]['months']
             elif key == 'addresses':
                 address = case[key][0]
                 location_id = address['locationId']
@@ -220,12 +219,10 @@ def convert_contacts_json_to_csv(contacts, ref_data):
         keys = contact.keys()
         for key in keys:
             if key =='followUp':
-                #feature['followUpStatus'] = contact[key]['status']
                 feature['dateFollowUpStart'] = contact[key]['startDate']
                 feature['dateFollowUpEnd'] = contact[key]['endDate']
             elif key == 'age':
                 feature['age'] = contact[key]['years']
-               # feature['age_months'] = contact[key]['months']
             elif key == 'addresses':
                 address = contact[key][0]
                 location_id = address['locationId']
@@ -705,7 +702,6 @@ def create_featureclass(path_to_csv_file, in_gd_outgdbworkspace, output_filename
 
     return None, final_output_fc_path    
 
-
 def join_to_geo(path_to_csv_file, in_gd_outgdbworkspace, output_filename, in_gd_geolayer, in_gd_geojoinfield, in_gd_shouldkeepallgeo, tbl_name, unique_location_ids):
     # create cases FC table
     arcpy.SetProgressor('default', f'Joining {tbl_name} table to geography ...')
@@ -742,7 +738,6 @@ class CreateSITREPTables(object):
 
     def getParameterInfo(self):
         """Define parameter definitions"""
-         #Define parameter definitions
 
         #######################
         # START DEFINE PARAMS #
@@ -796,14 +791,6 @@ class CreateSITREPTables(object):
             parameterType="Optional",
             direction="Input")
 
-        # # Output Folder for CSV Summary files
-        # param_output_summary_folder = arcpy.Parameter(
-        #     displayName="Output folder for Summary Data CSVs",
-        #     name="in_gd_outcsvsummfolder",
-        #     datatype="DEFolder",
-        #     parameterType="Optional",
-        #     direction="Input")
-
         # Output Workspace
         param_outworkspace = arcpy.Parameter(
             displayName="File Geodatabase Output Workspace for Features and Tables",
@@ -856,7 +843,6 @@ class CreateSITREPTables(object):
 
         param_geojoinfield.parameterDependencies = [param_geolayer.name]
 
-        #param_output_summary.enabled=False
         param_joingeo.enabled=False
         param_geolayer.enabled = False
         param_geojoinfield.enabled = False
@@ -895,12 +881,9 @@ class CreateSITREPTables(object):
             parameters[3].filter.list = outbreaks
             parameters[3].value = outbreaks[0]
          
-
         if parameters[3].value:
-            # parameters[11].value = outbreaks_cache[parameters[3].value]
             selected_outbreak_id = outbreaks_cache[parameters[3].value]
 
-        #parameters[6].enabled = parameters[5].value
         parameters[6].enabled = parameters[5].value
         parameters[7].enabled = parameters[5].value
 
@@ -1049,7 +1032,6 @@ class CreateSITREPTables(object):
         cases = get_cases(selected_outbreak_id, in_gd_api_url, token)
         new_cases = convert_cases_json_to_csv(cases, ref_data)
         cases_df = pd.DataFrame(new_cases)
-        cases_df.to_csv(r'C:\Users\Adam McKay\Desktop\WHO 2021\godata\cases_df.csv')
         fieldValueSplitter(cases_df, 'classification', 'CLASSIFICATION_')
         fieldValueSplitter(cases_df, 'gender', 'GENDER_')
         fieldValueSplitter(cases_df, 'occupation', 'OCCUPATION_')
@@ -1118,7 +1100,6 @@ class CreateSITREPTables(object):
         relates_out.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
         #relates_df.to_csv(full_job_path_raw.joinpath('Relationships.csv'), index=False)
 
-
         #prep locations file for join using the lowest level admin that is found in the cases data
         all_loc_ids =  locations_df[['id', 'adminLevel']].loc[locations_df['adminLevel']!=-1].rename(columns={'id':'locationId'}).set_index('locationId')
         all_cases_loc_ids = cases_df.groupby('locationId', as_index=False).count()[['locationId', 'id']].rename(columns={'id':'cnt'}).set_index('locationId')
@@ -1156,81 +1137,31 @@ class CreateSITREPTables(object):
         contacts_df=contacts_df[contact_model]
         contacts_df.to_csv(full_job_path_raw.joinpath('Contacts.csv'), index=False)
 
-
         start_date = min(list([datetime.strptime(c['dateOfReporting'], dte_format).date() for c in new_cases]))
         
         if in_gd_outputsumm:
             # Cases by Reporting Area
             features = []
             for case in new_cases:
-                location_id = case['locationId']
-        
-                reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
-        
+                location_id = case['locationId']   
+                reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()      
                 feature = get_feature(location_id, features, 'cases_by_reporting_area')
-        
                 # yesterday
                 if reporting_date == yesterday:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'DAILY_NEW_CONFIRMED')
-    
                 # cumulative
                 if reporting_date >= start_date:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'CUM_CONFIRMED')                    
-
                 #last week
                 if reporting_date >= last_week:
-                    # conf = None
-                    # prob = None
-            
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'CONFIRMED_LAST_SEVEN')
-                        # conf = cnt
-                    # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    #     cnt = increment_count(feature, 'PROBABLE_LAST_SEVEN')
-                    #     prob = cnt
-
-                    # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_SUSPECT':
-                    #     increment_count(feature, 'SUSPECT_LAST_SEVEN')
-            
-                    # if prob is not None or conf is not None:
-                    #     if prob is None:
-                    #         prob = 0
-                    #     if conf is None:
-                    #         conf = 0
-                    
-                        #current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN']
-                        # if current_count is None:
-                        #     current_count = 0
-                        #     feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = 0
-                
-                        # feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_SEVEN'] = current_count + (prob + conf)
-
+                #last two weeks
                 if reporting_date >= last_two_weeks:
-                    # conf = None
-                    # prob = None
-            
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'CONFIRMED_LAST_FOURTEEN')
-                        #conf = cnt
-                    # elif case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_PROBABLE':
-                    #     cnt = increment_count(feature, 'PROBABLE_LAST_FOURTEEN')
-                    #     prob = cnt
-                
-                    # if prob is not None or conf is not None:
-                    #     if prob is None:
-                    #         prob = 0
-                    #     if conf is None:
-                    #         conf = 0
-                    
-                    #     current_count = feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN']
-                    #     if current_count is None:
-                    #         current_count = 0
-                    #         feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = 0
-                
-                    #     feature['attributes']['TOTAL_CONFIRMED_PROBABLE_LAST_FOURTEEN'] = current_count + (prob + conf)
-
             # convert features back to csv_rows
             headers, cases_by_rep_csv_rows = convert_features_to_csv(features)
 
@@ -1323,17 +1254,12 @@ class CreateSITREPTables(object):
                             unique_location_ids.append(c[k])
 
             pctchg_features = []
-            # sum_conf_prob_7 = 0
-            # sum_conf_prob_14 = 0
-            # sum_conf_prob_8_14 = 0
-            # sum_conf_prob_15_28 = 0
 
             for case in new_cases:
                 location_id = case['locationId']
         
                 reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
-            #reporting_date_fm = reporting_date.strftime('%Y-%m-%d')
-            
+           
                 feature = get_feature(location_id, pctchg_features, 'pctchg_by_reporting_area')                   
         
                 if reporting_date >= last_week:
@@ -1430,6 +1356,6 @@ class CreateSITREPTables(object):
 
             if len(output_paths) > 0:
                 # set the output parameter
-                arcpy.SetParameter(11, ';'.join(output_paths))
+                arcpy.SetParameter(10, ';'.join(output_paths))
         
         return 
