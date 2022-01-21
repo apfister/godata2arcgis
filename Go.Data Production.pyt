@@ -12,20 +12,27 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import pandas as pd
 
-def create_working_directory(in_loc, summary):
-    now_ts = datetime.now().strftime('%Y-%m-%d_%H%M%S')   
-    # current_wd = Path(os.path.dirname(os.path.realpath(__file__)))
-    output_path = Path(in_loc)
-    raw_data_folder = f'GoData Raw Data - {now_ts}'
-    raw_data_path = output_path.joinpath(raw_data_folder)
-    raw_data_path.mkdir()
-    if summary:
-        summ_data_folder = f'GoData Summary Data - {now_ts}'
-        summ_data_path = output_path.joinpath(summ_data_folder)
-        summ_data_path.mkdir() 
-    else:
-        summ_data_path = None    
-    return [raw_data_path, summ_data_path, now_ts]
+# def create_working_directory(in_loc, summary):
+#     now_ts = datetime.now().strftime('%Y-%m-%d_%H%M%S')   
+#     # current_wd = Path(os.path.dirname(os.path.realpath(__file__)))
+#     output_path = Path(in_loc)
+#     raw_data_folder = f'GoData Raw Data - {now_ts}'
+#     raw_data_path = output_path.joinpath(raw_data_folder)
+#     raw_data_path.mkdir()
+#     if summary:
+#         summ_data_folder = f'GoData Summary Data - {now_ts}'
+#         summ_data_path = output_path.joinpath(summ_data_folder)
+#         summ_data_path.mkdir() 
+#     else:
+#         summ_data_path = None    
+#     return [raw_data_path, summ_data_path, now_ts]
+
+
+def set_working_directory(in_loc):
+    now_ts = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+    output_path = Path(in_loc) 
+    return output_path
+
 def get_token(url, username, password):
     data = {
         "username": username,
@@ -775,21 +782,31 @@ class CreateSITREPTables(object):
             parameterType="Required",
             direction="Input")
         
-        # Output Folder for CSV files (both Raw and Summary)
-        param_output_folder = arcpy.Parameter(
-            displayName="Output folder for CSVs",
-            name="in_gd_outputfolder",
+        # Output Folder for Raw files (Raw)
+        param_output_raw_folder = arcpy.Parameter(
+            displayName="Output folder for Raw CSVs",
+            name="in_gd_outputrawfolder",
             datatype="DEFolder",
             parameterType="Required",
             direction="Input")
-        
-        # Output CSV Summary files
+           
+        # Output CSV Summary files?
         param_output_summary = arcpy.Parameter(
             displayName = "Output summary files",
             name= "in_gd_outputsumm",
             datatype="GPBoolean",
             parameterType="Optional",
             direction="Input")
+        
+        
+        # Output Folder for Summary files (Summary)
+        param_output_summary_folder = arcpy.Parameter(
+            displayName="Output folder for Summary CSVs",
+            name="in_gd_outputsummfolder",
+            datatype="DEFolder",
+            parameterType="Optional",
+            direction="Input")
+
 
         # Output Workspace
         param_outworkspace = arcpy.Parameter(
@@ -841,14 +858,18 @@ class CreateSITREPTables(object):
             parameterType="Derived",
             direction="Output")
 
-        param_geojoinfield.parameterDependencies = [param_geolayer.name]
-
+        
         param_joingeo.enabled=False
         param_geolayer.enabled = False
         param_geojoinfield.enabled = False
         param_keepallgeo.enabled = False
-
-        return [param_url, param_username, param_password, param_outbreak, param_output_folder, param_output_summary,  param_outworkspace, param_joingeo, param_geolayer, param_geojoinfield, param_keepallgeo, param_outputfcpaths]
+        param_output_summary_folder.enabled = False
+        param_geojoinfield.parameterDependencies = [param_geolayer.name]
+        
+        return [param_url, param_username, param_password, param_outbreak, #4
+            param_output_raw_folder, param_output_summary,  param_output_summary_folder,#3
+            param_outworkspace, param_joingeo, param_geolayer,#3
+            param_geojoinfield, param_keepallgeo, param_outputfcpaths]#3
 
     def isLicensed(self):
         """Set whether tool is licensed to execute."""
@@ -858,6 +879,7 @@ class CreateSITREPTables(object):
         global outbreaks_cache
         global selected_outbreak_id
         global token
+
 
         if parameters[0].altered and not parameters[0].hasBeenValidated or (parameters[1].altered and not parameters[1].hasBeenValidated) or (parameters[2].altered and not parameters[2].hasBeenValidated):
             url = parameters[0].value
@@ -883,18 +905,24 @@ class CreateSITREPTables(object):
          
         if parameters[3].value:
             selected_outbreak_id = outbreaks_cache[parameters[3].value]
-
+        
         parameters[6].enabled = parameters[5].value
+        
         parameters[7].enabled = parameters[5].value
+        parameters[8].enabled = parameters[5].value
 
-        parameters[8].enabled = parameters[7].value
-        parameters[9].enabled = parameters[7].value
-        parameters[10].enabled = parameters[7].value
+        parameters[9].enabled = parameters[8].value
+        parameters[10].enabled = parameters[8].value
+        parameters[11].enabled = parameters[8].value
        
         return
 
     def updateMessages(self, parameters):
+        if parameters[5].value ==True & (not parameters[6].value):
+            parameters[6].setErrorMessage('Please enter a valid pathway for summary outputs')
 
+        if parameters[5].value ==True & (not parameters[7].value):
+            parameters[7].setErrorMessage('Please enter a valid pathway for spatial data outputs')
         return
 
     def execute(self, parameters, messages):
@@ -911,18 +939,23 @@ class CreateSITREPTables(object):
         in_gd_username = parameters[1].valueAsText
         in_gd_password = parameters[2].valueAsText
         in_gd_outbreak = selected_outbreak_id
-        in_gd_outputfolder = parameters[4].valueAsText
+        in_gd_outputrawfolder = parameters[4].valueAsText
         in_gd_outputsumm = parameters[5].value
-        in_gd_outgdbworkspace = parameters[6].valueAsText
-        in_gd_shouldjoin = parameters[7].value    
-        in_gd_geolayer = parameters[8].value
-        in_gd_geojoinfield = parameters[9].valueAsText
-        in_gd_shouldkeepallgeo = parameters[10].value
+        in_gd_outputsummfolder = parameters[6].valueAsText
+        in_gd_outgdbworkspace = parameters[7].valueAsText
+        in_gd_shouldjoin = parameters[8].value    
+        in_gd_geolayer = parameters[9].value
+        in_gd_geojoinfield = parameters[10].valueAsText
+        in_gd_shouldkeepallgeo = parameters[11].value
 
-        wd = create_working_directory(in_gd_outputfolder, in_gd_outputsumm)
-        full_job_path_raw = wd[0]
-        full_job_path_summ = wd[1]
-        now_ts = wd[2]
+        #wd = create_working_directory(in_gd_outputrawfolder, in_gd_outputsumm)      
+        #full_job_path_raw = wd[0]
+        #full_job_path_summ = wd[1]
+        #now_ts = wd[2]
+
+        full_job_path_raw = set_working_directory(in_gd_outputrawfolder)
+        if in_gd_outputsumm:
+            full_job_path_summ = set_working_directory(in_gd_outputsummfolder)
 
        # wd_raw = create_working_directory(in_gd_outcsvrawfolder, in_gd_outputsumm)
         #full_job_path_raw = wd_raw[0]
