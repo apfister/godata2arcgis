@@ -534,9 +534,8 @@ def increment_count(feature, field):
     return feature['attributes'][field]
 
 def get_geom(geo_field, geo_value, join_field_type):
-    global geom_cache
-    global geo_fl
-
+    global geom_cache #dict
+    global geo_fl  #geography feature layer
     # if join_field_type == 'TEXT':
     #     geo_value = f"'{geo_value}'"
 
@@ -553,7 +552,7 @@ def get_geom(geo_field, geo_value, join_field_type):
         except: 
             pass
 
-        if row and len(row) > 0:
+        if row and len(row) > 0: #if the row exists and has data
             # arcpy.AddMessage(row)
             geom = row[0]
             geo_val_to_add = row[1]
@@ -583,16 +582,16 @@ def create_featureclass(path_to_csv_file, in_gd_outgdbworkspace, output_filename
 
     arcpy.SetProgressor('default', 'Converting CSV file to Table in memory ...')
     # write csv to temp table in output workspace - will be deleted later
-    tmp_cases_table = 'tbl_tmp'
+    tmp_table = 'tbl_tmp'
     try:
-        arcpy.TableToTable_conversion(str(path_to_csv_file), 'memory', tmp_cases_table)
+        arcpy.TableToTable_conversion(str(path_to_csv_file), 'memory', tmp_table)
     except Exception:
         e = sys.exc_info()[1]
         error = e.args[0]
         print (error)
         return error, None
 
-    in_mem_gd_tbl = f'memory\\{tmp_cases_table}'
+    in_mem_gd_tbl = f'memory\\{tmp_table}'
 
     try:
         arcpy.MakeFeatureLayer_management(in_gd_geolayer, geo_fl)
@@ -632,11 +631,20 @@ def create_featureclass(path_to_csv_file, in_gd_outgdbworkspace, output_filename
             alias = f.aliasName            
             field_type = f.type
             if f.type in add_field_type_map.keys():
-                field_type = add_field_type_map[f.type]
+                field_type = add_field_type_map[f.type]         
 
             gd_tbl_fields.append([f.name, field_type, alias, f.length])
+    
+    # for f in arcpy.ListFields(geo_fl):
+    #     if not f.required:
+    #         alias = f.aliasName            
+    #         field_type = f.type
+    #         if f.type in add_field_type_map.keys():
+    #             field_type = add_field_type_map[f.type]
+    #         if f.name not in drop_keys:
+    #             gd_tbl_fields.append([f.name, field_type, alias, f.length])
 
-    # add the fields
+
     arcpy.SetProgressor('default', 'Adding fields to output feature class ...')
     try:
         arcpy.AddFields_management(os.path.join(in_gd_outgdbworkspace, output_filename), gd_tbl_fields)
@@ -645,7 +653,7 @@ def create_featureclass(path_to_csv_file, in_gd_outgdbworkspace, output_filename
         error = e.args[0]
         print (error)
         return error, None
-
+    
     gd_fields_list = [f.name for f in gd_fields]
     gd_fields_list.insert(0, 'SHAPE@')
 
@@ -660,13 +668,13 @@ def create_featureclass(path_to_csv_file, in_gd_outgdbworkspace, output_filename
 
             gd_cursor_fields = cursor.fields
             search_val = row[gd_cursor_fields.index('locationId')]
-            geom = get_geom(in_gd_geojoinfield, search_val, join_field_type)
+            geom = get_geom(in_gd_geojoinfield, search_val, join_field_type)        
 
             row_list = list(row)
             row_list.insert(0, geom)
             insert_row = tuple(row_list)
             # arcpy.AddMessage(insert_row)
-
+            
             with arcpy.da.InsertCursor(final_output_fc_path, gd_fields_list) as ic:
                 try:
                     ic.insertRow(insert_row)
@@ -973,12 +981,11 @@ class CreateSITREPTables(object):
         two_week_delta = timedelta(weeks=2)
 
         yesterday = (right_now - yesterday_delta).date()
+        seven_days_ago = (right_now - one_week_delta).date()
         eight_days_ago = (right_now - eight_days_delta).date()
+        fourteen_days_ago = (right_now - two_week_delta).date()
         fifteen_days_ago = (right_now - fifteen_days_delta).date()
         twenty_eight_days_ago = (right_now - twenty_eight_days_delta).date()
-        yesterday = (right_now - yesterday_delta).date()
-        last_week = (right_now - one_week_delta).date()
-        last_two_weeks = (right_now - two_week_delta).date() 
         
         date_flds = ['date', 'dateOfReporting', 'dateOfOnset', 'dateOfInfection', 'dateOfLastContact', 
                     'dateBecomeCase', 'dateOfOutcome', 'dateFollowUpStart' , 'dateFollowUpEnd', 'dateOfBurial']
@@ -1091,9 +1098,9 @@ class CreateSITREPTables(object):
         contacts_df['dateFollowUpEnd'] = pd.to_datetime(contacts_df['dateFollowUpEnd']).dt.date
         contacts_df.loc[(contacts_df['dateFollowUpStart']<= yesterday) & (contacts_df['dateFollowUpEnd'] >= right_now.date()), ['followUpStatus']] = True
         contacts_df.loc[contacts_df['followUpStatus'] != True, ['followUpStatus']] = False
-        contacts_df.loc[(contacts_df['dateFollowUpStart']<= last_week) & (contacts_df['dateFollowUpEnd'] >= last_week), ['followUpStatusPast7Days']] = True
+        contacts_df.loc[(contacts_df['dateFollowUpStart']<= seven_days_ago) & (contacts_df['dateFollowUpEnd'] >= seven_days_ago), ['followUpStatusPast7Days']] = True
         contacts_df.loc[contacts_df['followUpStatusPast7Days'] != True, ['followUpStatusPast7Days']] = False
-        contacts_df.loc[(contacts_df['dateFollowUpStart']<= last_two_weeks) & (contacts_df['dateFollowUpEnd'] >= last_two_weeks), ['followUpStatusPast14Days']] = True
+        contacts_df.loc[(contacts_df['dateFollowUpStart']<= fourteen_days_ago) & (contacts_df['dateFollowUpEnd'] >= fourteen_days_ago), ['followUpStatusPast14Days']] = True
         contacts_df.loc[contacts_df['followUpStatusPast14Days'] != True, ['followUpStatusPast14Days']] = False
         
         # create followups_df
@@ -1178,21 +1185,21 @@ class CreateSITREPTables(object):
             for case in new_cases:
                 location_id = case['locationId']   
                 reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()      
-                feature = get_feature(location_id, features, 'cases_by_reporting_area')
+                feature = get_feature(location_id, features, 'cases_by_reporting_area') # get/create the dictionary for the location_id
                 # yesterday
                 if reporting_date == yesterday:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'DAILY_NEW_CONFIRMED')
                 # cumulative
-                if reporting_date >= start_date:
+                if  start_date <= reporting_date <= yesterday:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'CUM_CONFIRMED')                    
                 #last week
-                if reporting_date >= last_week:
+                if seven_days_ago <= reporting_date <= yesterday:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'CONFIRMED_LAST_SEVEN')
                 #last two weeks
-                if reporting_date >= last_two_weeks:
+                if fourteen_days_ago <= reporting_date <= yesterday:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'CONFIRMED_LAST_FOURTEEN')
             # convert features back to csv_rows
@@ -1222,8 +1229,8 @@ class CreateSITREPTables(object):
                 if err is not None:
                     arcpy.AddError(err)
 
-                output_paths.append(fc_path)           
-                
+                output_paths.append(fc_path)
+                          
 
             # Deaths by Reporting Area
             filtered_cases = [c for c in new_cases if 'outcomeId_code' in c and c['outcomeId_code'] == 'LNG_REFERENCE_DATA_CATEGORY_OUTCOME_DECEASED']
@@ -1243,13 +1250,13 @@ class CreateSITREPTables(object):
                 
                 feature = get_feature(location_id, deaths_features, 'deaths_by_reporting_area') 
         
-                if reporting_date >= start_date:
+                if start_date  <= reporting_date <= yesterday:
                     increment_count(feature, 'CUM_DEATHS')                    
         
-                if reporting_date >= last_week:
+                if seven_days_ago <= reporting_date <= yesterday:
                     increment_count(feature, 'DEATHS_LAST_SEVEN')
 
-                if reporting_date >= last_two_weeks:
+                if fourteen_days_ago <= reporting_date <=  yesterday:
                     increment_count(feature, 'DEATHS_LAST_FOURTEEN')
 
 
@@ -1295,19 +1302,19 @@ class CreateSITREPTables(object):
            
                 feature = get_feature(location_id, pctchg_features, 'pctchg_by_reporting_area')                   
         
-                if reporting_date >= last_week:
+                if seven_days_ago <= reporting_date <=  yesterday:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'AVG_CONFIRMED_LAST_SEVEN')
                     
-                if reporting_date >= last_two_weeks:
+                if fourteen_days_ago <= reporting_date <=  yesterday:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'AVG_CONFIRMED_LAST_FOURTEEN')
                 
-                if eight_days_ago >= reporting_date >= last_two_weeks:
+                if fourteen_days_ago <= reporting_date <=  eight_days_ago:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'AVG_CONFIRMED_EIGHT_TO_FOURTEEN')
                             
-                if fifteen_days_ago >= reporting_date >= twenty_eight_days_ago:
+                if twenty_eight_days_ago <= reporting_date <=  fifteen_days_ago:
                     if case['classification_code'] == 'LNG_REFERENCE_DATA_CATEGORY_CASE_CLASSIFICATION_CONFIRMED':
                         increment_count(feature, 'AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT')
 
