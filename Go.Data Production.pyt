@@ -1245,19 +1245,20 @@ class CreateSITREPTables(object):
             deaths_features = []
             for case in filtered_cases:
                 location_id = case['locationId']
-        
-                reporting_date = datetime.strptime(case['dateOfReporting'], dte_format).date()
-                
-                feature = get_feature(location_id, deaths_features, 'deaths_by_reporting_area') 
-        
-                if start_date  <= reporting_date <= yesterday:
-                    increment_count(feature, 'CUM_DEATHS')                    
-        
-                if seven_days_ago <= reporting_date <= yesterday:
-                    increment_count(feature, 'DEATHS_LAST_SEVEN')
+                if 'dateOfOutcome' in case:
+                    
+                    death_date = datetime.strptime(case['dateOfOutcome'], dte_format).date()
+                    
+                    feature = get_feature(location_id, deaths_features, 'deaths_by_reporting_area') 
+            
+                    if start_date  <= death_date <= yesterday:
+                        increment_count(feature, 'CUM_DEATHS')                    
+            
+                    if seven_days_ago <= death_date <= yesterday:
+                        increment_count(feature, 'DEATHS_LAST_SEVEN')
 
-                if fourteen_days_ago <= reporting_date <=  yesterday:
-                    increment_count(feature, 'DEATHS_LAST_FOURTEEN')
+                    if fourteen_days_ago <= death_date <=  yesterday:
+                        increment_count(feature, 'DEATHS_LAST_FOURTEEN')
 
 
             if len(deaths_features) > 0:
@@ -1396,6 +1397,6 @@ class CreateSITREPTables(object):
 
             if len(output_paths) > 0:
                 # set the output parameter
-                arcpy.SetParameter(10, ';'.join(output_paths))
+                arcpy.SetParameter(12, ';'.join(output_paths))
         
         return 
