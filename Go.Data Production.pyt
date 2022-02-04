@@ -12,22 +12,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import pandas as pd
 
-# def create_working_directory(in_loc, summary):
-#     now_ts = datetime.now().strftime('%Y-%m-%d_%H%M%S')   
-#     # current_wd = Path(os.path.dirname(os.path.realpath(__file__)))
-#     output_path = Path(in_loc)
-#     raw_data_folder = f'GoData Raw Data - {now_ts}'
-#     raw_data_path = output_path.joinpath(raw_data_folder)
-#     raw_data_path.mkdir()
-#     if summary:
-#         summ_data_folder = f'GoData Summary Data - {now_ts}'
-#         summ_data_path = output_path.joinpath(summ_data_folder)
-#         summ_data_path.mkdir() 
-#     else:
-#         summ_data_path = None    
-#     return [raw_data_path, summ_data_path, now_ts]
-
-
 def set_working_directory(in_loc):
     now_ts = datetime.now().strftime('%Y-%m-%d_%H%M%S')
     output_path = Path(in_loc) 
@@ -59,7 +43,7 @@ def get_token(url, username, password):
             status_code = error['statusCode']
             return f'Error {status_code} :: {msg}'
         else:
-            return 'error autheticating'
+            return 'error authenticating'
     
     return token
 
@@ -316,7 +300,7 @@ def convert_followups_json_to_csv(followups, ref_data):
         features.append(feature)
     return features
 
-def create_csv_file(rows, file_name='fromGoData.csv', field_names=None, full_job_path=None):
+def create_csv_file(rows, file_name, field_names=None, full_job_path=None):
     full_path_to_file = full_job_path.joinpath(file_name)
 
     with open(full_path_to_file, 'w', newline='') as f:
@@ -362,9 +346,9 @@ def get_attribute_model(in_model):
             'attributes': {
                 'locationId': None,
                 'locationName': None,
-                'UNDER_FOLLOWUP_PREVIOUS_DAY': None,
-                'UNDER_FOLLOWUP_LAST_SEVEN': None,
-                'UNDER_FOLLOWUP_LAST_FOURTEEN': None,
+                'UNDER_FOLLOWUP': None,
+                'PAST_7_DAYS': None,
+                'PAST_14_DAYS': None,
             }
         }
     }
@@ -435,9 +419,9 @@ def get_FieldNameUpdater(in_model):
                 'dateOfReporting':'date_of_reporting',
                 'dateOfLastContact':'date_of_last_contact',
                 'dateOfBurial':'date_of_burial',
-                'followUpStatus':'follow_up_status',
-                'followUpStatusPast7Days': '',
-                'followUpStatusPast14Days': '',
+                'underFollowUp':'follow_up_status',
+                'followUpPast7Days': '',
+                'followUpPast14Days': '',
                 'dateFollowUpStart':'date_of_follow_up_start',
                 'dateFollowUpEnd':'date_of_follow_up_end',
                 'wasCase':'was_case',
@@ -1096,12 +1080,12 @@ class CreateSITREPTables(object):
             contacts_df['ageClass'] = pd.cut(contacts_df['age'], bins=age_bins, labels=age_labels)
         contacts_df['dateFollowUpStart'] = pd.to_datetime(contacts_df['dateFollowUpStart']).dt.date
         contacts_df['dateFollowUpEnd'] = pd.to_datetime(contacts_df['dateFollowUpEnd']).dt.date
-        contacts_df.loc[(contacts_df['dateFollowUpStart']<= yesterday) & (contacts_df['dateFollowUpEnd'] >= right_now.date()), ['followUpStatus']] = True
-        contacts_df.loc[contacts_df['followUpStatus'] != True, ['followUpStatus']] = False
-        contacts_df.loc[(contacts_df['dateFollowUpStart']<= seven_days_ago) & (contacts_df['dateFollowUpEnd'] >= seven_days_ago), ['followUpStatusPast7Days']] = True
-        contacts_df.loc[contacts_df['followUpStatusPast7Days'] != True, ['followUpStatusPast7Days']] = False
-        contacts_df.loc[(contacts_df['dateFollowUpStart']<= fourteen_days_ago) & (contacts_df['dateFollowUpEnd'] >= fourteen_days_ago), ['followUpStatusPast14Days']] = True
-        contacts_df.loc[contacts_df['followUpStatusPast14Days'] != True, ['followUpStatusPast14Days']] = False
+        contacts_df.loc[(contacts_df['dateFollowUpStart']<= yesterday) & (contacts_df['dateFollowUpEnd'] >= right_now.date()), ['underFollowUp']] = True
+        contacts_df.loc[contacts_df['underFollowUp'] != True, ['underFollowUp']] = False
+        contacts_df.loc[(contacts_df['dateFollowUpStart'] >= seven_days_ago) & (contacts_df['dateFollowUpStart'] <= yesterday), ['followUpPast7Days']] = True
+        contacts_df.loc[contacts_df['followUpPast7Days'] != True, ['followUpPast7Days']] = False
+        contacts_df.loc[(contacts_df['dateFollowUpStart'] >= fourteen_days_ago) & (contacts_df['dateFollowUpStart'] <= yesterday), ['followUpPast14Days']] = True
+        contacts_df.loc[contacts_df['followUpPast14Days'] != True, ['followUpPast14Days']] = False
         
         # create followups_df
         arcpy.SetProgressor('default', 'Getting Followup Data')
@@ -1336,10 +1320,10 @@ class CreateSITREPTables(object):
                 if val is not None:
                     feature['attributes']['AVG_CONFIRMED_FIFTEEN_TO_TWENTY_EIGHT'] = round(val / 14, 2)
             
-                val2 = feature['attributes']['AVG_CONFIRMED_LAST_SEVEN']
+                val2 = feature['attributes']['AVG_CONFIRMED_LAST_SEVEN']  
                 val1 = feature['attributes']['AVG_CONFIRMED_EIGHT_TO_FOURTEEN']
                 if val2 is not None and val1 is not None and val2 > 0 and val1 > 0:
-                    pct_chg = ((val2 - val1) / abs(val1)) * 100
+                    pct_chg = ((val2 - val1) / abs(val1)) * 100  
                     feature['attributes']['PERCENT_CHANGE_RECENT_SEVEN'] = pct_chg
             
                 val2 = feature['attributes']['AVG_CONFIRMED_LAST_FOURTEEN']
@@ -1374,9 +1358,10 @@ class CreateSITREPTables(object):
             arcpy.SetProgressor('default', 'Creating Contacts by Reporting Area CSV file ...')
             output_filename = 'Contacts_by_Reporting_Area'
             path_to_csv_file = full_job_path_summ.joinpath('Contacts_by_Reporting_Area.csv').resolve()
-            contacts_summary = contacts_df[['locationId' ,f'admin_{admin_level}_name','followUpStatus', 'followUpStatusPast7Days', 'followUpStatusPast14Days']].copy()
+            contacts_summary = contacts_df[['locationId' ,f'admin_{admin_level}_name','underFollowUp', 'followUpPast7Days', 'followUpPast14Days']].copy()
             contacts_summary.replace({True:1,False:0}, inplace=True)
-            contacts_summary = contacts_summary.groupby(['locationId', f'admin_{admin_level}_name'])[['followUpStatus', 'followUpStatusPast7Days', 'followUpStatusPast14Days']].sum()
+            contacts_summary.rename(columns={'underFollowUp':'UNDER_FOLLOWUP','followUpPast7Days':'PAST_7_DAYS', 'followUpPast14Days':'PAST_14_DAYS'}, inplace=True)
+            contacts_summary = contacts_summary.groupby(['locationId', f'admin_{admin_level}_name'])[['UNDER_FOLLOWUP', 'PAST_7_DAYS', 'PAST_14_DAYS']].sum()
             contacts_summary = contacts_summary.loc[contacts_summary.sum(axis=1)>0]
             contacts_summary.reset_index(inplace=True)
             unique_location_ids = list(set(contacts_summary['locationId'].unique()))
