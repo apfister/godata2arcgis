@@ -1080,11 +1080,11 @@ class CreateSITREPTables(object):
             contacts_df['ageClass'] = pd.cut(contacts_df['age'], bins=age_bins, labels=age_labels)
         contacts_df['dateFollowUpStart'] = pd.to_datetime(contacts_df['dateFollowUpStart']).dt.date
         contacts_df['dateFollowUpEnd'] = pd.to_datetime(contacts_df['dateFollowUpEnd']).dt.date
-        contacts_df.loc[(contacts_df['dateFollowUpStart']<= yesterday) & (contacts_df['dateFollowUpEnd'] >= right_now.date()), ['underFollowUp']] = True
+        contacts_df.loc[(contacts_df['dateFollowUpStart']<= yesterday) & (contacts_df['dateFollowUpEnd'] >= right_now.date()), 'underFollowUp'] = True
         contacts_df.loc[contacts_df['underFollowUp'] != True, ['underFollowUp']] = False
-        contacts_df.loc[(contacts_df['dateFollowUpStart'] >= seven_days_ago) & (contacts_df['dateFollowUpStart'] <= yesterday), ['followUpPast7Days']] = True
+        contacts_df.loc[(contacts_df['dateFollowUpStart'] >= seven_days_ago) & (contacts_df['dateFollowUpStart'] <= yesterday), 'followUpPast7Days'] = True
         contacts_df.loc[contacts_df['followUpPast7Days'] != True, ['followUpPast7Days']] = False
-        contacts_df.loc[(contacts_df['dateFollowUpStart'] >= fourteen_days_ago) & (contacts_df['dateFollowUpStart'] <= yesterday), ['followUpPast14Days']] = True
+        contacts_df.loc[(contacts_df['dateFollowUpStart'] >= fourteen_days_ago) & (contacts_df['dateFollowUpStart'] <= yesterday), 'followUpPast14Days'] = True
         contacts_df.loc[contacts_df['followUpPast14Days'] != True, ['followUpPast14Days']] = False
         
         # create followups_df
@@ -1198,7 +1198,7 @@ class CreateSITREPTables(object):
             output_filename = 'Cases_By_Reporting_Area'
             err = create_fc_table(str(path_to_csv_file), in_gd_outgdbworkspace, output_filename)
             if err is not None:
-                arcpy.AddError(error)
+                arcpy.AddError(err)
 
             unique_location_ids = []
             for c in new_cases:
@@ -1259,7 +1259,7 @@ class CreateSITREPTables(object):
             output_filename = 'Deaths_By_Reporting_Area'
             err = create_fc_table(str(path_to_csv_file), in_gd_outgdbworkspace, output_filename)
             if err is not None:
-                arcpy.AddError(error)
+                arcpy.AddError(err)
 
             # join to geography
             if in_gd_shouldjoin:
@@ -1344,7 +1344,7 @@ class CreateSITREPTables(object):
             output_filename = 'Percent_Change_in_New_Cases_by_Reporting_Area'
             err = create_fc_table(str(path_to_csv_file), in_gd_outgdbworkspace, output_filename)
             if err is not None:
-                arcpy.AddError(error)
+                arcpy.AddError(err)
 
             # join to geography
             if in_gd_shouldjoin:
@@ -1370,7 +1370,7 @@ class CreateSITREPTables(object):
             arcpy.SetProgressor('default', 'Creating Contacts_by_Reporting_Area feature class table ...')
             err = create_fc_table(str(path_to_csv_file), in_gd_outgdbworkspace, output_filename)
             if err is not None:
-                arcpy.AddError(error)
+                arcpy.AddError(err)
 
             # join to geography
             if in_gd_shouldjoin:
